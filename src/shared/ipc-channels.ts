@@ -28,10 +28,14 @@ export const IPC = {
   SUBMOLTS_GET_DETAIL: 'submolts:get-detail',
   SUBMOLTS_GET_FEED: 'submolts:get-feed',
   SUBMOLTS_GET_GALAXY: 'submolts:get-galaxy',
+  SUBMOLTS_GET_PAGE: 'submolts:get-page',
   SUBMOLTS_CREATE: 'submolts:create',
   SUBMOLTS_SUBSCRIBE: 'submolts:subscribe',
   SUBMOLTS_UNSUBSCRIBE: 'submolts:unsubscribe',
   SUBMOLTS_UPDATE_SETTINGS: 'submolts:update-settings',
+  SUBMOLTS_CACHE_SYNC: 'submolts:cache-sync',
+  SUBMOLTS_SEARCH_CACHED: 'submolts:search-cached',
+  SUBMOLTS_CACHE_STATUS: 'submolts:cache-status',
 
   // Moderation
   MOD_PIN: 'moderation:pin',

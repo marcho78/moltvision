@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import { useStore } from '../../stores'
-import { invoke } from '../../lib/ipc'
+import { invoke, on } from '../../lib/ipc'
 import { IPC } from '@shared/ipc-channels'
 import type { LLMProviderName, ApiKeyStatus } from '@shared/domain.types'
 
@@ -140,6 +140,102 @@ function MoltbookRegister() {
   )
 }
 
+function SubmoltDatabase() {
+  const [status, setStatus] = useState<{ cached: number; total: number; syncing: boolean; phase: string }>({
+    cached: 0, total: 0, syncing: false, phase: ''
+  })
+  const { addNotification } = useStore()
+
+  // Check initial status
+  useEffect(() => {
+    invoke<{ total_cached: number; syncing: boolean }>(IPC.SUBMOLTS_SEARCH_CACHED, { keyword: '', limit: 1 })
+      .then((resp) => {
+        setStatus(prev => ({ ...prev, cached: resp?.total_cached ?? 0, syncing: resp?.syncing ?? false }))
+      })
+      .catch(() => {})
+  }, [])
+
+  // Listen for progress updates
+  useEffect(() => {
+    return on(IPC.SUBMOLTS_CACHE_STATUS, (s: unknown) => {
+      const data = s as { syncing: boolean; cached: number; total: number; phase: string }
+      setStatus(data)
+      if (!data.syncing && data.cached > 0 && data.phase === 'Up to date') {
+        addNotification(`Submolt database updated: ${data.cached.toLocaleString()} communities`, 'success')
+      }
+    })
+  }, [addNotification])
+
+  const handleSync = () => {
+    invoke(IPC.SUBMOLTS_CACHE_SYNC, { force: false }).catch(() => {})
+    setStatus(prev => ({ ...prev, syncing: true, phase: 'Starting...' }))
+  }
+
+  const handleForceSync = () => {
+    invoke(IPC.SUBMOLTS_CACHE_SYNC, { force: true }).catch(() => {})
+    setStatus(prev => ({ ...prev, syncing: true, phase: 'Starting full re-sync...' }))
+  }
+
+  return (
+    <div className="panel-card p-3 space-y-3">
+      <div className="flex items-center justify-between">
+        <h3 className="text-sm font-medium">Submolt Database</h3>
+        {status.cached > 0 && !status.syncing && (
+          <span className="text-[10px] text-molt-success flex items-center gap-1">
+            <span className="w-1.5 h-1.5 rounded-full bg-molt-success" />
+            Synced
+          </span>
+        )}
+      </div>
+
+      <p className="text-xs text-molt-muted">
+        {status.cached > 0
+          ? `${status.cached.toLocaleString()} communities cached locally. Search and browse submolts from the Feed panel or Search filters.`
+          : 'Sync the submolt database to search and browse communities by name. This is a one-time download that stays in your local database. You can still use the app while syncing.'}
+      </p>
+
+      {/* Progress bar during sync */}
+      {status.syncing && (
+        <div className="space-y-1.5">
+          <div className="flex items-center gap-2">
+            <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2"
+              className="animate-spin text-molt-accent shrink-0" strokeLinecap="round">
+              <path d="M14 8A6 6 0 112.5 5.5" />
+            </svg>
+            <span className="text-xs text-molt-muted">{status.phase}</span>
+          </div>
+          {status.total > 0 && (
+            <div className="w-full h-1.5 bg-molt-bg rounded-full overflow-hidden">
+              <div
+                className="h-full bg-molt-accent rounded-full transition-all duration-500"
+                style={{ width: `${Math.min((status.cached / status.total) * 100, 100)}%` }}
+              />
+            </div>
+          )}
+        </div>
+      )}
+
+      <div className="flex gap-2">
+        <button
+          onClick={handleSync}
+          disabled={status.syncing}
+          className="btn-primary text-xs"
+        >
+          {status.syncing ? 'Syncing...' : status.cached > 0 ? 'Update Submolts' : 'Sync Submolts'}
+        </button>
+        {status.cached > 0 && !status.syncing && (
+          <button
+            onClick={handleForceSync}
+            className="btn-secondary text-xs"
+          >
+            Full Re-sync
+          </button>
+        )}
+      </div>
+    </div>
+  )
+}
+
 function LlmSelector() {
   const { activeLlm, setActiveLlm, addNotification } = useStore()
   const providers: LLMProviderName[] = ['claude', 'openai', 'gemini', 'grok']
@@ -220,6 +316,7 @@ export function SettingsPanel() {
         )}
         {activeTab === 'data' && (
           <div className="space-y-3">
+            <SubmoltDatabase />
             <div className="panel-card">
               <h3 className="text-sm font-medium mb-3">Data Management</h3>
               <div className="flex gap-2">

@@ -39,7 +39,9 @@ export type PanelId =
   | 'settings'
   | 'bonus'
 
-export type SortOrder = 'hot' | 'new' | 'top' | 'controversial'
+export type SortOrder = 'hot' | 'new' | 'top' | 'rising'
+
+export type FeedSource = 'all' | 'subscribed' | 'submolt'
 
 // --- Moltbook API Data Types ---
 
@@ -106,7 +108,12 @@ export interface SearchResult {
   title: string
   snippet: string
   score: number
-  embedding?: number[]
+  author?: string
+  submolt?: string
+  post_id?: string
+  upvotes?: number
+  downvotes?: number
+  created_at?: string
 }
 
 export interface VoteResult {

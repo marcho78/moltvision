@@ -5,7 +5,7 @@ import type {
   ActivityLogEntry, RateLimitState, GalaxyNode, GalaxyEdge,
   NetworkNode, NetworkEdge, SearchResult, SearchCluster,
   UserPreferences, ApiKeyStatus, MoodData, TrendItem,
-  Rivalry, KarmaForecast, PostIdea, SortOrder, OperationMode,
+  Rivalry, KarmaForecast, PostIdea, SortOrder, FeedSource, OperationMode,
   LLMProviderName, VoteDirection
 } from '@shared/domain.types'
 
@@ -25,17 +25,24 @@ interface UISlice {
 }
 
 // --- Feed Slice ---
+type FeedView = 'compact' | 'card'
+
 interface FeedSlice {
   posts: Post[]
   sortOrder: SortOrder
+  feedSource: FeedSource
   selectedSubmolt: string | null
-  cursor: string | null
+  nextOffset: number | null
+  hasMore: boolean
   loading: boolean
-  setPosts: (posts: Post[]) => void
-  appendPosts: (posts: Post[], cursor: string | null) => void
+  feedView: FeedView
+  setPosts: (posts: Post[], nextOffset?: number | null, hasMore?: boolean) => void
+  appendPosts: (posts: Post[], nextOffset: number | null, hasMore: boolean) => void
   setSortOrder: (sort: SortOrder) => void
+  setFeedSource: (source: FeedSource) => void
   setSelectedSubmolt: (submoltId: string | null) => void
   setFeedLoading: (loading: boolean) => void
+  setFeedView: (view: FeedView) => void
   updatePostVote: (postId: string, direction: VoteDirection, newKarma: number) => void
 }
 
@@ -55,20 +62,26 @@ interface SubmoltsSlice {
   submolts: Submolt[]
   galaxyNodes: GalaxyNode[]
   galaxyEdges: GalaxyEdge[]
-  selectedSubmolt: Submolt | null
+  selectedSubmoltDetail: Submolt | null
   setSubmolts: (submolts: Submolt[]) => void
   setGalaxyData: (nodes: GalaxyNode[], edges: GalaxyEdge[]) => void
   setSelectedSubmoltDetail: (submolt: Submolt | null) => void
 }
 
 // --- Conversation Slice ---
+type ConversationView = 'thread' | 'tree'
+
 interface ConversationSlice {
   activePostId: string | null
+  activePost: Post | null
   comments: Comment[]
   selectedComment: Comment | null
+  conversationView: ConversationView
   setActivePost: (postId: string | null) => void
+  setActivePostData: (post: Post | null) => void
   setComments: (comments: Comment[]) => void
   setSelectedComment: (comment: Comment | null) => void
+  setConversationView: (view: ConversationView) => void
 }
 
 // --- Persona Slice ---
@@ -179,14 +192,28 @@ export const useStore = create<AppState>((set) => ({
   // --- Feed ---
   posts: [],
   sortOrder: 'hot',
+  feedSource: 'all',
   selectedSubmolt: null,
-  cursor: null,
+  nextOffset: null,
+  hasMore: false,
   loading: false,
-  setPosts: (posts) => set({ posts }),
-  appendPosts: (posts, cursor) => set((s) => ({ posts: [...s.posts, ...posts], cursor })),
-  setSortOrder: (sortOrder) => set({ sortOrder }),
-  setSelectedSubmolt: (submoltId) => set({ selectedSubmolt: submoltId }),
+  feedView: 'card',
+  setPosts: (posts, nextOffset, hasMore) => set({ posts, nextOffset: nextOffset ?? null, hasMore: hasMore ?? false }),
+  appendPosts: (posts, nextOffset, hasMore) => set((s) => {
+    // Deduplicate by post id
+    const existingIds = new Set(s.posts.map((p) => p.id))
+    const newPosts = posts.filter((p) => !existingIds.has(p.id))
+    return { posts: [...s.posts, ...newPosts], nextOffset, hasMore }
+  }),
+  setSortOrder: (sortOrder) => set({ sortOrder, posts: [], nextOffset: null, hasMore: false }),
+  setFeedSource: (feedSource) => set({ feedSource, posts: [], nextOffset: null, hasMore: false }),
+  setSelectedSubmolt: (submoltId) => set((s) => ({
+    selectedSubmolt: submoltId,
+    feedSource: submoltId ? 'submolt' : s.feedSource === 'submolt' ? 'all' : s.feedSource,
+    posts: [], nextOffset: null, hasMore: false
+  })),
   setFeedLoading: (loading) => set({ loading }),
+  setFeedView: (feedView) => set({ feedView }),
   updatePostVote: (postId, direction, newKarma) =>
     set((s) => ({
       posts: s.posts.map((p) => (p.id === postId ? { ...p, our_vote: direction, karma: newKarma } : p))
@@ -208,15 +235,19 @@ export const useStore = create<AppState>((set) => ({
   selectedSubmoltDetail: null,
   setSubmolts: (submolts) => set({ submolts }),
   setGalaxyData: (galaxyNodes, galaxyEdges) => set({ galaxyNodes, galaxyEdges }),
-  setSelectedSubmoltDetail: (submolt) => set({ selectedSubmolt: submolt as any }),
+  setSelectedSubmoltDetail: (submolt) => set({ selectedSubmoltDetail: submolt }),
 
   // --- Conversation ---
   activePostId: null,
+  activePost: null,
   comments: [],
   selectedComment: null,
+  conversationView: 'thread',
   setActivePost: (activePostId) => set({ activePostId }),
+  setActivePostData: (activePost) => set({ activePost }),
   setComments: (comments) => set({ comments }),
   setSelectedComment: (selectedComment) => set({ selectedComment }),
+  setConversationView: (conversationView) => set({ conversationView }),
 
   // --- Persona ---
   activePersona: null,
@@ -231,7 +262,7 @@ export const useStore = create<AppState>((set) => ({
   searchResults: [],
   searchClusters: [],
   searchPoints: [],
-  similarityThreshold: 0.5,
+  similarityThreshold: 0,
   setSearchQuery: (searchQuery) => set({ searchQuery }),
   setSearchResults: (searchResults) => set({ searchResults }),
   setSearchClusters: (searchClusters, searchPoints) => set({ searchClusters, searchPoints }),

@@ -1,6 +1,7 @@
 import { app, BrowserWindow, ipcMain } from 'electron'
 import log from 'electron-log'
 import { initDb, closeDb } from './db/index'
+import { resetAllRateLimits } from './db/queries/rate-limits.queries'
 import { createMainWindow } from './window'
 import { registerAllHandlers } from './ipc/index'
 
@@ -28,6 +29,10 @@ if (!gotTheLock) {
 
     // Initialize database
     initDb()
+
+    // Reset client-side rate limits on startup (stale from previous session)
+    resetAllRateLimits()
+    log.info('Rate limits reset for new session')
 
     // Create main window
     mainWindow = createMainWindow()

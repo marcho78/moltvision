@@ -166,6 +166,12 @@ CREATE TABLE IF NOT EXISTS post_performance (
 CREATE INDEX IF NOT EXISTS idx_post_perf_post ON post_performance(post_id);
 CREATE INDEX IF NOT EXISTS idx_post_perf_time ON post_performance(recorded_at DESC);
 
+-- User Subscriptions (persistent — never cleared by cache cleanup)
+CREATE TABLE IF NOT EXISTS user_subscriptions (
+  submolt_name TEXT PRIMARY KEY,
+  subscribed_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 -- Operational Tables
 CREATE TABLE IF NOT EXISTS rate_limits (
   resource TEXT PRIMARY KEY,
@@ -235,6 +241,24 @@ export function initDb(): Database.Database {
 
   db.exec(SCHEMA_SQL)
   log.info('Database schema applied successfully')
+
+  // --- One-time migrations ---
+  const currentVersion = (db.prepare('SELECT version FROM schema_version WHERE id = 1').get() as any)?.version ?? 1
+  if (currentVersion < 2) {
+    // v2: Clear stale posts cache that stored UUIDs as author names
+    db.exec('DELETE FROM cached_posts')
+    db.prepare('UPDATE schema_version SET version = 2, applied_at = datetime(\'now\') WHERE id = 1').run()
+    log.info('Migration v2: Cleared stale posts cache (UUID author fix)')
+  }
+
+  // --- Startup cleanup: session-scoped caches start fresh ---
+  const submoltsCleared = db.prepare(`DELETE FROM cached_submolts`).run().changes
+  const postsExpired = db.prepare(`DELETE FROM cached_posts WHERE cached_at < datetime('now', '-3 days')`).run().changes
+  const commentsExpired = db.prepare(`DELETE FROM cached_comments WHERE cached_at < datetime('now', '-7 days')`).run().changes
+  const agentsExpired = db.prepare(`DELETE FROM cached_agents WHERE cached_at < datetime('now', '-7 days')`).run().changes
+  if (submoltsCleared || postsExpired || commentsExpired || agentsExpired) {
+    log.info(`Startup cache cleanup: cleared ${submoltsCleared} submolts, expired ${postsExpired} posts, ${commentsExpired} comments, ${agentsExpired} agents`)
+  }
 
   return db
 }

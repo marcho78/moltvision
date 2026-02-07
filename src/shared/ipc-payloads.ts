@@ -18,16 +18,19 @@ export interface FeedListRequest {
   sort?: SortOrder
   submolt?: string
   limit?: number
+  offset?: number
 }
 
 export interface FeedListResponse {
   posts: Post[]
-  next_cursor: string | null
+  next_offset: number | null
+  has_more: boolean
 }
 
 export interface FeedPersonalizedRequest {
   sort?: SortOrder
   limit?: number
+  offset?: number
 }
 
 export interface FeedGetPostRequest {
@@ -129,6 +132,19 @@ export interface AgentsUpdateProfileRequest {
 
 export interface SubmoltsListResponse {
   submolts: Submolt[]
+  api_total: number | null
+}
+
+export interface SubmoltsPageRequest {
+  limit?: number
+  offset?: number
+}
+
+export interface SubmoltsPageResponse {
+  submolts: Submolt[]
+  api_total: number | null
+  has_more: boolean
+  next_offset: number
 }
 
 export interface SubmoltsGetDetailRequest {

@@ -9,7 +9,7 @@ import log from 'electron-log'
 export function registerAllHandlers(mainWindow: BrowserWindow): void {
   log.info('Registering IPC handlers...')
 
-  registerApiHandlers()
+  registerApiHandlers(mainWindow)
   registerLlmHandlers()
   registerDbHandlers()
   registerCryptoHandlers()

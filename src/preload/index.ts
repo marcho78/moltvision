@@ -7,8 +7,9 @@ const ALLOWED_CHANNELS = new Set([
   'comments:get-tree', 'comments:create', 'comments:upvote',
   'agents:list', 'agents:get-profile', 'agents:get-my-profile', 'agents:get-network',
   'agents:follow', 'agents:unfollow', 'agents:register', 'agents:update-profile',
-  'submolts:list', 'submolts:get-detail', 'submolts:get-feed', 'submolts:get-galaxy',
+  'submolts:list', 'submolts:get-detail', 'submolts:get-feed', 'submolts:get-galaxy', 'submolts:get-page',
   'submolts:create', 'submolts:subscribe', 'submolts:unsubscribe', 'submolts:update-settings',
+  'submolts:cache-sync', 'submolts:search-cached',
   'moderation:pin', 'moderation:unpin', 'moderation:add-mod', 'moderation:remove-mod', 'moderation:get-mods',
   'llm:generate', 'llm:generate-stream', 'llm:embed',
   'autopilot:set-mode', 'autopilot:get-queue', 'autopilot:approve', 'autopilot:reject',
@@ -24,7 +25,8 @@ const ALLOWED_CHANNELS = new Set([
 const ALLOWED_EVENTS = new Set([
   'autopilot:status-update',
   'api:rate-limit-update',
-  'llm:stream-chunk'
+  'llm:stream-chunk',
+  'submolts:cache-status'
 ])
 
 const api: MoltApi = {

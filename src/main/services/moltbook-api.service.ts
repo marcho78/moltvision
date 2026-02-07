@@ -48,6 +48,13 @@ export class NotFoundError extends MoltbookApiError {
 // --- Rate Limit Tracker ---
 
 class RateLimitTracker {
+  /** Parse SQLite UTC datetime (no timezone suffix) as UTC in JavaScript */
+  private parseUtc(sqliteDatetime: string): Date {
+    const s = sqliteDatetime.trim()
+    if (s.endsWith('Z') || s.includes('+') || s.includes('T')) return new Date(s)
+    return new Date(s.replace(' ', 'T') + 'Z')
+  }
+
   parseHeaders(headers: Headers, resource: string): void {
     const remaining = headers.get('x-ratelimit-remaining')
     const reset = headers.get('x-ratelimit-reset')
@@ -59,7 +66,7 @@ class RateLimitTracker {
   canRequest(resource: string): boolean {
     const limit = getRateLimit(resource)
     if (!limit) return true
-    if (new Date(limit.reset_at) <= new Date()) return true
+    if (this.parseUtc(limit.reset_at) <= new Date()) return true
     return limit.remaining > 0
   }
 }
@@ -145,6 +152,7 @@ export class MoltbookClient {
     decrementRateLimit(resource)
 
     const url = `${BASE_URL}${path}`
+    log.info(`API Request: ${opts.method ?? 'GET'} ${url}`)
     const headers: Record<string, string> = {
       'Authorization': `Bearer ${this.apiKey}`,
       ...((opts.headers as Record<string, string>) ?? {})
@@ -158,6 +166,7 @@ export class MoltbookClient {
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
         const response = await electronFetch(url, { ...opts, headers })
+        log.info(`API Response: ${response.status} ${response.statusText} for ${opts.method ?? 'GET'} ${url}`)
 
         this.rateLimits.parseHeaders(response.headers, resource)
 
@@ -320,21 +329,23 @@ export class MoltbookClient {
   // Post Endpoints
   // ==========================================
 
-  /** GET /posts — get feed with sort/limit/submolt filter */
-  async getFeed(opts: { sort?: string; submolt?: string; limit?: number } = {}) {
+  /** GET /posts — get feed with sort/limit/submolt filter/offset pagination */
+  async getFeed(opts: { sort?: string; submolt?: string; limit?: number; offset?: number } = {}) {
     const params = new URLSearchParams()
     if (opts.sort) params.set('sort', opts.sort)
     if (opts.submolt) params.set('submolt', opts.submolt)
     if (opts.limit) params.set('limit', opts.limit.toString())
+    if (opts.offset) params.set('offset', opts.offset.toString())
     const qs = params.toString()
-    return this.fetch<{ posts: any[]; next_cursor: string | null }>(`/posts${qs ? `?${qs}` : ''}`)
+    return this.fetch<{ posts: any[]; next_offset?: number; has_more?: boolean }>(`/posts${qs ? `?${qs}` : ''}`)
   }
 
   /** GET /feed — personalized feed (subscriptions + follows) */
-  async getPersonalizedFeed(opts: { sort?: string; limit?: number } = {}) {
+  async getPersonalizedFeed(opts: { sort?: string; limit?: number; offset?: number } = {}) {
     const params = new URLSearchParams()
     if (opts.sort) params.set('sort', opts.sort)
     if (opts.limit) params.set('limit', opts.limit.toString())
+    if (opts.offset) params.set('offset', opts.offset.toString())
     const qs = params.toString()
     return this.fetch<{ posts: any[]; next_cursor: string | null }>(`/feed${qs ? `?${qs}` : ''}`)
   }
@@ -418,10 +429,15 @@ export class MoltbookClient {
     })
   }
 
-  /** GET /submolts — list all communities */
-  async getSubmolts() {
-    return this.fetch<{ submolts: any[] }>('/submolts')
+  /** GET /submolts — list communities (single page) */
+  async getSubmolts(opts: { limit?: number; offset?: number } = {}) {
+    const params = new URLSearchParams()
+    if (opts.limit) params.set('limit', opts.limit.toString())
+    if (opts.offset) params.set('offset', opts.offset.toString())
+    const qs = params.toString()
+    return this.fetch<{ submolts: any[]; count?: number; has_more?: boolean; next_offset?: number }>(`/submolts${qs ? `?${qs}` : ''}`)
   }
+
 
   /** GET /submolts/{name} — get community info (includes your_role) */
   async getSubmoltDetail(submoltName: string) {
@@ -490,12 +506,15 @@ export class MoltbookClient {
   // ==========================================
 
   /** GET /search — semantic AI-powered search. q max 500 chars, limit max 50 */
-  async search(query: string, type?: string, limit?: number) {
+  async search(query: string, opts: { type?: string; limit?: number; cursor?: string; author?: string; submolt?: string } = {}) {
     if (query.length > 500) query = query.slice(0, 500)
     const params = new URLSearchParams({ q: query })
-    if (type) params.set('type', type)
-    if (limit) params.set('limit', Math.min(limit, 50).toString())
-    return this.fetch<{ results: any[] }>(`/search?${params}`)
+    if (opts.type) params.set('type', opts.type)
+    if (opts.limit) params.set('limit', Math.min(opts.limit, 50).toString())
+    if (opts.cursor) params.set('cursor', opts.cursor)
+    if (opts.author) params.set('author', opts.author)
+    if (opts.submolt) params.set('submolt', opts.submolt)
+    return this.fetch<{ results: any[]; next_cursor: string | null; has_more: boolean; count: number }>(`/search?${params}`)
   }
 
   // ==========================================

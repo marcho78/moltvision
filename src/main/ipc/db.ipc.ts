@@ -95,38 +95,72 @@ export function registerDbHandlers(): void {
     return { data, filename: `moltvision-settings-${Date.now()}.json` }
   })
 
-  // --- Search Clusters (UMAP-based) ---
+  // --- Search Clusters ---
+  // Layout uses similarity score: high similarity = near center, low = outer ring.
+  // Type (post/comment) determines angular sector so they separate visually.
   ipcMain.handle(IPC.SEARCH_GET_CLUSTERS, async (_e, payload) => {
-    // Simple cluster assignment based on result types
     const { results } = payload
-    const clusters: any[] = []
+    if (!Array.isArray(results) || results.length === 0) return { clusters: [], points: [] }
+
     const points: any[] = []
-    const typeGroups = new Map<string, any[]>()
+    const typeOffsets: Record<string, number> = {}
+    let nextOffset = 0
+
+    // Assign each type an angular sector
+    results.forEach((r: any) => {
+      const type = r.type || 'post'
+      if (!(type in typeOffsets)) {
+        typeOffsets[type] = nextOffset
+        nextOffset++
+      }
+    })
+    const typeCount = Math.max(nextOffset, 1)
+
+    // Track items per type for clusters
+    const typeItems = new Map<string, string[]>()
 
     results.forEach((r: any, i: number) => {
-      const type = r.type || 'unknown'
-      if (!typeGroups.has(type)) typeGroups.set(type, [])
-      typeGroups.get(type)!.push(r)
-      // Simple pseudo-random 2D layout
-      const angle = (i / results.length) * Math.PI * 2
-      const radius = 2 + Math.random() * 3
-      points.push({ id: r.id, x: Math.cos(angle) * radius + (Math.random() - 0.5), y: Math.sin(angle) * radius + (Math.random() - 0.5) })
+      const type = r.type || 'post'
+      const sim = r.score ?? r.similarity ?? 0.5
+      if (!typeItems.has(type)) typeItems.set(type, [])
+      typeItems.get(type)!.push(r.id)
+
+      // Distance from center: high similarity = close (small radius), low = far
+      const dist = (1 - sim) * 8 + 0.5
+
+      // Angular position: sector by type + spread within sector by index
+      const sectorSize = (Math.PI * 2) / typeCount
+      const sectorStart = typeOffsets[type] * sectorSize
+      const itemsInType = results.filter((x: any) => (x.type || 'post') === type).length
+      const indexInType = typeItems.get(type)!.length - 1
+      const spreadAngle = itemsInType > 1 ? (indexInType / (itemsInType - 1)) * (sectorSize * 0.8) : sectorSize * 0.4
+      const angle = sectorStart + sectorSize * 0.1 + spreadAngle
+
+      // Small jitter to avoid perfect overlaps
+      const jx = (Math.random() - 0.5) * 0.3
+      const jy = (Math.random() - 0.5) * 0.3
+
+      points.push({
+        id: r.id,
+        x: Math.cos(angle) * dist + jx,
+        y: Math.sin(angle) * dist + jy
+      })
     })
 
-    const colors = ['#7c5cfc', '#22c55e', '#3b82f6', '#eab308']
-    let ci = 0
-    typeGroups.forEach((items, type) => {
-      const clusterPoints = points.filter((p: any) => items.some((r: any) => r.id === p.id))
-      const cx = clusterPoints.reduce((s: number, p: any) => s + p.x, 0) / clusterPoints.length
-      const cy = clusterPoints.reduce((s: number, p: any) => s + p.y, 0) / clusterPoints.length
+    // Build clusters from type groups
+    const colors: Record<string, string> = { post: '#7c5cfc', comment: '#22c55e', agent: '#3b82f6', submolt: '#eab308' }
+    const clusters: any[] = []
+    typeItems.forEach((ids, type) => {
+      const cPoints = points.filter((p: any) => ids.includes(p.id))
+      const cx = cPoints.reduce((s: number, p: any) => s + p.x, 0) / cPoints.length
+      const cy = cPoints.reduce((s: number, p: any) => s + p.y, 0) / cPoints.length
       clusters.push({
         id: type,
-        label: type,
+        label: type.charAt(0).toUpperCase() + type.slice(1) + 's',
         center: [cx, cy],
-        items: items.map((r: any) => r.id),
-        color: colors[ci % colors.length]
+        items: ids,
+        color: colors[type] ?? '#7c5cfc'
       })
-      ci++
     })
 
     return { clusters, points }
