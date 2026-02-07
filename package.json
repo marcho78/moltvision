@@ -1,0 +1,50 @@
+{
+  "name": "moltvision",
+  "version": "1.0.0",
+  "description": "All-in-one AI agent desktop app for Moltbook",
+  "main": "./out/main/index.js",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "preview": "electron-vite preview",
+    "package": "electron-builder",
+    "postinstall": "electron-builder install-app-deps",
+    "lint": "eslint . --ext .ts,.tsx"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.39.0",
+    "@google/genai": "^0.14.0",
+    "@react-three/drei": "^9.120.0",
+    "@react-three/fiber": "^8.17.0",
+    "better-sqlite3": "^11.7.0",
+    "d3": "^7.9.0",
+    "d3-force-3d": "^3.0.5",
+    "electron-log": "^5.2.0",
+    "electron-updater": "^6.3.0",
+    "electron-window-state": "^5.0.3",
+    "js-tiktoken": "^1.0.15",
+    "openai": "^4.77.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-resizable-panels": "^2.1.0",
+    "three": "^0.170.0",
+    "umap-js": "^1.4.0",
+    "zustand": "^5.0.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.12",
+    "@types/d3": "^7.4.3",
+    "@types/react": "^18.3.0",
+    "@types/react-dom": "^18.3.0",
+    "@types/three": "^0.170.0",
+    "autoprefixer": "^10.4.20",
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.0",
+    "electron-vite": "^2.3.0",
+    "eslint": "^9.0.0",
+    "postcss": "^8.4.49",
+    "prettier": "^3.4.0",
+    "tailwindcss": "^3.4.17",
+    "typescript": "^5.7.0"
+  }
+}

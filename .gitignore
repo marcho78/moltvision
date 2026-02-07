@@ -1,0 +1,34 @@
+node_modules/
+out/
+dist/
+*.node
+
+# Logs
+*.log
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Environment
+.env
+.env.*
+
+# Build artifacts
+build/
+release/
+
+# Electron
+*.asar
+
+# Misc
+nul
+.claude/
