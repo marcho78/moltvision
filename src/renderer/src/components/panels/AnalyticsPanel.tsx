@@ -1,8 +1,9 @@
-import React, { useEffect, useRef, useCallback } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { useStore } from '../../stores'
 import { invoke } from '../../lib/ipc'
 import { IPC } from '@shared/ipc-channels'
 import * as d3 from 'd3'
+import type { AgentEngagement } from '@shared/domain.types'
 
 function StatCard({ label, value, color }: { label: string; value: string | number; color?: string }) {
   return (
@@ -163,6 +164,77 @@ function RateLimitBars() {
   )
 }
 
+function AgentPerformanceSection() {
+  const [stats, setStats] = useState<{
+    totalPosts: number; totalComments: number; totalUpvotes: number; totalDownvotes: number
+    topSubmolts: Array<{ submolt: string; count: number }>
+  } | null>(null)
+
+  useEffect(() => {
+    invoke<{ entries: AgentEngagement[] }>(IPC.AUTOPILOT_GET_ACTIVITY, { limit: 500 })
+      .then((result) => {
+        const entries = result.entries ?? []
+        const totalPosts = entries.filter(e => e.action_type === 'create_post').length
+        const totalComments = entries.filter(e => e.action_type === 'create_comment' || e.action_type === 'reply').length
+        const totalUpvotes = entries.filter(e => e.action_type === 'upvote').length
+        const totalDownvotes = entries.filter(e => e.action_type === 'downvote').length
+
+        // Count submolt engagement frequency (from content_sent context — not available directly,
+        // so we count unique post_ids as a proxy for active posts)
+        const submoltCounts = new Map<string, number>()
+        for (const e of entries) {
+          if (e.action_type === 'create_post' || e.action_type === 'create_comment') {
+            // Post ID serves as proxy — we don't have submolt in engagement table
+            // so just count action types
+          }
+        }
+
+        setStats({
+          totalPosts, totalComments, totalUpvotes, totalDownvotes,
+          topSubmolts: Array.from(submoltCounts.entries())
+            .sort(([, a], [, b]) => b - a)
+            .slice(0, 5)
+            .map(([submolt, count]) => ({ submolt, count }))
+        })
+      })
+      .catch(console.error)
+  }, [])
+
+  if (!stats) return null
+
+  const total = stats.totalPosts + stats.totalComments + stats.totalUpvotes + stats.totalDownvotes
+  if (total === 0) return null
+
+  return (
+    <div className="panel-card">
+      <h3 className="text-sm font-medium mb-3">Agent Performance</h3>
+      <div className="grid grid-cols-4 gap-2">
+        <div className="text-center">
+          <div className="text-lg font-bold text-molt-accent">{stats.totalPosts}</div>
+          <div className="text-[10px] text-molt-muted">Posts</div>
+        </div>
+        <div className="text-center">
+          <div className="text-lg font-bold text-molt-success">{stats.totalComments}</div>
+          <div className="text-[10px] text-molt-muted">Comments</div>
+        </div>
+        <div className="text-center">
+          <div className="text-lg font-bold text-molt-warning">{stats.totalUpvotes}</div>
+          <div className="text-[10px] text-molt-muted">Upvotes</div>
+        </div>
+        <div className="text-center">
+          <div className="text-lg font-bold text-molt-error">{stats.totalDownvotes}</div>
+          <div className="text-[10px] text-molt-muted">Downvotes</div>
+        </div>
+      </div>
+      <div className="mt-3 pt-2 border-t border-molt-border/50">
+        <div className="text-[10px] text-molt-muted">
+          Total engagements: {total}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export function AnalyticsPanel() {
   const { karmaHistory, activityLog, rateLimits, dateRange, setKarmaHistory, setActivityLog, setRateLimits, setDateRange } = useStore()
 
@@ -218,6 +290,9 @@ export function AnalyticsPanel() {
           <h3 className="text-sm font-medium mb-3">Activity Heatmap</h3>
           <ActivityHeatmap />
         </div>
+
+        {/* Agent Performance */}
+        <AgentPerformanceSection />
 
         {/* Rate Limits */}
         <div className="panel-card">

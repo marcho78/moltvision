@@ -49,6 +49,7 @@ export const IPC = {
   LLM_GENERATE_STREAM: 'llm:generate-stream',
   LLM_EMBED: 'llm:embed',
   LLM_STREAM_CHUNK: 'llm:stream-chunk',
+  LLM_WHOAMI: 'llm:whoami',
 
   // Autopilot
   AUTOPILOT_SET_MODE: 'autopilot:set-mode',
@@ -58,6 +59,12 @@ export const IPC = {
   AUTOPILOT_EMERGENCY_STOP: 'autopilot:emergency-stop',
   AUTOPILOT_GET_LOG: 'autopilot:get-log',
   AUTOPILOT_STATUS_UPDATE: 'autopilot:status-update',
+  AUTOPILOT_LIVE_EVENT: 'autopilot:live-event',
+  AUTOPILOT_SET_PERSONA: 'autopilot:set-persona',
+  AUTOPILOT_GET_PERSONA: 'autopilot:get-persona',
+  AUTOPILOT_GET_ACTIVITY: 'autopilot:get-activity',
+  AUTOPILOT_GET_REPLIES: 'autopilot:get-replies',
+  AUTOPILOT_MARK_REPLIES_READ: 'autopilot:mark-replies-read',
 
   // Search
   SEARCH_EXECUTE: 'search:execute',

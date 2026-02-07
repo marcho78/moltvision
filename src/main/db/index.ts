@@ -26,9 +26,10 @@ CREATE TABLE IF NOT EXISTS agent_persona (
   description TEXT NOT NULL DEFAULT '',
   tone_settings TEXT NOT NULL DEFAULT '{"style":"friendly","temperature":0.7,"max_length":500}',
   interest_tags TEXT NOT NULL DEFAULT '[]',
-  engagement_rules TEXT NOT NULL DEFAULT '{"engagement_rate":0.3,"min_karma_threshold":0,"reply_to_replies":true,"avoid_controversial":false,"max_posts_per_hour":2,"max_comments_per_hour":10}',
+  engagement_rules TEXT NOT NULL DEFAULT '{"engagement_rate":0.3,"min_karma_threshold":0,"reply_to_replies":true,"avoid_controversial":false,"max_posts_per_hour":2,"max_comments_per_hour":10,"max_reply_depth":3,"max_replies_per_thread":2}',
   submolt_priorities TEXT NOT NULL DEFAULT '{}',
   system_prompt TEXT NOT NULL DEFAULT 'You are a helpful and engaging AI agent participating in Moltbook discussions.',
+  llm_provider TEXT NOT NULL DEFAULT 'claude',
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -43,7 +44,8 @@ CREATE TABLE IF NOT EXISTS user_preferences (
   operation_mode TEXT NOT NULL DEFAULT 'off',
   heartbeat_interval INTEGER NOT NULL DEFAULT 15000,
   llm_temperature REAL NOT NULL DEFAULT 0.7,
-  max_tokens INTEGER NOT NULL DEFAULT 1024
+  max_tokens INTEGER NOT NULL DEFAULT 1024,
+  active_persona_id TEXT NOT NULL DEFAULT 'default'
 );
 INSERT OR IGNORE INTO user_preferences (id) VALUES (1);
 
@@ -219,6 +221,51 @@ CREATE TABLE IF NOT EXISTS activity_log (
 CREATE INDEX IF NOT EXISTS idx_activity_type ON activity_log(activity_type);
 CREATE INDEX IF NOT EXISTS idx_activity_level ON activity_log(level);
 CREATE INDEX IF NOT EXISTS idx_activity_time ON activity_log(created_at DESC);
+
+-- Engagement Tracking Tables (v3)
+CREATE TABLE IF NOT EXISTS agent_engagements (
+  id TEXT PRIMARY KEY,
+  post_id TEXT NOT NULL,
+  comment_id TEXT,
+  action_type TEXT NOT NULL,
+  content_sent TEXT,
+  persona_id TEXT NOT NULL DEFAULT 'default',
+  reasoning TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_engagements_post ON agent_engagements(post_id);
+CREATE INDEX IF NOT EXISTS idx_engagements_type ON agent_engagements(action_type);
+CREATE INDEX IF NOT EXISTS idx_engagements_time ON agent_engagements(created_at DESC);
+
+CREATE TABLE IF NOT EXISTS agent_content_performance (
+  id TEXT PRIMARY KEY,
+  post_id TEXT,
+  comment_id TEXT,
+  content_type TEXT NOT NULL,
+  karma_at_creation INTEGER NOT NULL DEFAULT 0,
+  karma_current INTEGER NOT NULL DEFAULT 0,
+  comment_count INTEGER NOT NULL DEFAULT 0,
+  last_checked_at TEXT NOT NULL DEFAULT (datetime('now')),
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_perf_post ON agent_content_performance(post_id);
+CREATE INDEX IF NOT EXISTS idx_perf_time ON agent_content_performance(created_at DESC);
+
+CREATE TABLE IF NOT EXISTS reply_inbox (
+  id TEXT PRIMARY KEY,
+  parent_post_id TEXT NOT NULL,
+  parent_comment_id TEXT,
+  agent_original_content TEXT,
+  reply_comment_id TEXT NOT NULL UNIQUE,
+  reply_author TEXT NOT NULL,
+  reply_content TEXT NOT NULL,
+  depth INTEGER NOT NULL DEFAULT 0,
+  is_read INTEGER NOT NULL DEFAULT 0,
+  agent_responded INTEGER NOT NULL DEFAULT 0,
+  discovered_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_inbox_read ON reply_inbox(is_read);
+CREATE INDEX IF NOT EXISTS idx_inbox_time ON reply_inbox(discovered_at DESC);
 `
 
 let db: Database.Database | null = null
@@ -249,6 +296,31 @@ export function initDb(): Database.Database {
     db.exec('DELETE FROM cached_posts')
     db.prepare('UPDATE schema_version SET version = 2, applied_at = datetime(\'now\') WHERE id = 1').run()
     log.info('Migration v2: Cleared stale posts cache (UUID author fix)')
+  }
+  if (currentVersion < 3) {
+    // v3: Engagement tracking tables — schema already creates them via CREATE IF NOT EXISTS,
+    // but we bump the version to track migration state
+    db.prepare('UPDATE schema_version SET version = 3, applied_at = datetime(\'now\') WHERE id = 1').run()
+    log.info('Migration v3: Engagement tracking tables (agent_engagements, agent_content_performance, reply_inbox)')
+  }
+  if (currentVersion < 4) {
+    // v4: Add llm_provider column to agent_persona (for per-persona model selection)
+    // ALTER TABLE ADD COLUMN is safe — SQLite won't error on existing columns via IF NOT EXISTS
+    // but SQLite doesn't support IF NOT EXISTS on ALTER TABLE, so we check the schema first
+    const cols = db.pragma('table_info(agent_persona)') as any[]
+    if (!cols.some((c: any) => c.name === 'llm_provider')) {
+      db.exec("ALTER TABLE agent_persona ADD COLUMN llm_provider TEXT NOT NULL DEFAULT 'claude'")
+    }
+    db.prepare('UPDATE schema_version SET version = 4, applied_at = datetime(\'now\') WHERE id = 1').run()
+    log.info('Migration v4: Added llm_provider column to agent_persona')
+  }
+  if (currentVersion < 5) {
+    const cols = db.pragma('table_info(user_preferences)') as any[]
+    if (!cols.some((c: any) => c.name === 'active_persona_id')) {
+      db.exec("ALTER TABLE user_preferences ADD COLUMN active_persona_id TEXT NOT NULL DEFAULT 'default'")
+    }
+    db.prepare('UPDATE schema_version SET version = 5, applied_at = datetime(\'now\') WHERE id = 1').run()
+    log.info('Migration v5: Added active_persona_id to user_preferences')
   }
 
   // --- Startup cleanup: session-scoped caches start fresh ---

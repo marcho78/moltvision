@@ -28,16 +28,16 @@ export function registerDbHandlers(): void {
     const { persona } = payload
     const id = persona.id ?? 'default'
     run(
-      `INSERT INTO agent_persona (id, name, description, tone_settings, interest_tags, engagement_rules, submolt_priorities, system_prompt, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+      `INSERT INTO agent_persona (id, name, description, tone_settings, interest_tags, engagement_rules, submolt_priorities, system_prompt, llm_provider, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
        ON CONFLICT(id) DO UPDATE SET
          name=excluded.name, description=excluded.description, tone_settings=excluded.tone_settings,
          interest_tags=excluded.interest_tags, engagement_rules=excluded.engagement_rules,
          submolt_priorities=excluded.submolt_priorities, system_prompt=excluded.system_prompt,
-         updated_at=excluded.updated_at`,
+         llm_provider=excluded.llm_provider, updated_at=excluded.updated_at`,
       [id, persona.name, persona.description, JSON.stringify(persona.tone_settings),
        JSON.stringify(persona.interest_tags), JSON.stringify(persona.engagement_rules),
-       JSON.stringify(persona.submolt_priorities), persona.system_prompt]
+       JSON.stringify(persona.submolt_priorities), persona.system_prompt, persona.llm_provider ?? 'claude']
     )
     return { id }
   })
@@ -60,7 +60,7 @@ export function registerDbHandlers(): void {
   })
 
   ipcMain.handle(IPC.PERSONA_GENERATE_PREVIEW, async (_e, payload) => {
-    const { persona, sample_post } = payload
+    const { persona, sample_post, provider } = payload
     try {
       const response = await llmManager.chat({
         messages: [
@@ -68,9 +68,10 @@ export function registerDbHandlers(): void {
           { role: 'user', content: `As the persona "${persona.name}", respond to this post:\nTitle: ${sample_post.title}\nContent: ${sample_post.content}` }
         ],
         temperature: persona.tone_settings?.temperature ?? 0.7,
-        max_tokens: persona.tone_settings?.max_length ?? 500
+        max_tokens: persona.tone_settings?.max_length ?? 500,
+        provider: provider ?? persona.llm_provider ?? undefined
       })
-      return { preview_response: response.content, tone_analysis: `Style: ${persona.tone_settings?.style}` }
+      return { preview_response: response.content, provider_used: response.provider, tone_analysis: `Style: ${persona.tone_settings?.style}` }
     } catch (err: any) {
       return { preview_response: `Error: ${err.message}`, tone_analysis: '' }
     }

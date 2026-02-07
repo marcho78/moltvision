@@ -28,9 +28,10 @@ CREATE TABLE IF NOT EXISTS agent_persona (
   description TEXT NOT NULL DEFAULT '',
   tone_settings TEXT NOT NULL DEFAULT '{"style":"friendly","temperature":0.7,"max_length":500}',
   interest_tags TEXT NOT NULL DEFAULT '[]',
-  engagement_rules TEXT NOT NULL DEFAULT '{"engagement_rate":0.3,"min_karma_threshold":0,"reply_to_replies":true,"avoid_controversial":false,"max_posts_per_hour":2,"max_comments_per_hour":10}',
+  engagement_rules TEXT NOT NULL DEFAULT '{"engagement_rate":0.3,"min_karma_threshold":0,"reply_to_replies":true,"avoid_controversial":false,"max_posts_per_hour":2,"max_comments_per_hour":10,"max_reply_depth":3,"max_replies_per_thread":2}',
   submolt_priorities TEXT NOT NULL DEFAULT '{}',
   system_prompt TEXT NOT NULL DEFAULT 'You are a helpful and engaging AI agent participating in Moltbook discussions.',
+  llm_provider TEXT NOT NULL DEFAULT 'claude',
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -229,3 +230,54 @@ CREATE TABLE IF NOT EXISTS activity_log (
 CREATE INDEX IF NOT EXISTS idx_activity_type ON activity_log(activity_type);
 CREATE INDEX IF NOT EXISTS idx_activity_level ON activity_log(level);
 CREATE INDEX IF NOT EXISTS idx_activity_time ON activity_log(created_at DESC);
+
+-- =====================================================
+-- Engagement Tracking Tables (Migration v3)
+-- =====================================================
+
+-- Tracks every action the agent has taken (prevents re-engagement)
+CREATE TABLE IF NOT EXISTS agent_engagements (
+  id TEXT PRIMARY KEY,
+  post_id TEXT NOT NULL,
+  comment_id TEXT,
+  action_type TEXT NOT NULL,
+  content_sent TEXT,
+  persona_id TEXT NOT NULL DEFAULT 'default',
+  reasoning TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_engagements_post ON agent_engagements(post_id);
+CREATE INDEX IF NOT EXISTS idx_engagements_type ON agent_engagements(action_type);
+CREATE INDEX IF NOT EXISTS idx_engagements_time ON agent_engagements(created_at DESC);
+
+-- Tracks karma/replies on agent's own content over time
+CREATE TABLE IF NOT EXISTS agent_content_performance (
+  id TEXT PRIMARY KEY,
+  post_id TEXT,
+  comment_id TEXT,
+  content_type TEXT NOT NULL,
+  karma_at_creation INTEGER NOT NULL DEFAULT 0,
+  karma_current INTEGER NOT NULL DEFAULT 0,
+  comment_count INTEGER NOT NULL DEFAULT 0,
+  last_checked_at TEXT NOT NULL DEFAULT (datetime('now')),
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_perf_post ON agent_content_performance(post_id);
+CREATE INDEX IF NOT EXISTS idx_perf_time ON agent_content_performance(created_at DESC);
+
+-- Inbox: replies to the agent's posts/comments (discovered via polling)
+CREATE TABLE IF NOT EXISTS reply_inbox (
+  id TEXT PRIMARY KEY,
+  parent_post_id TEXT NOT NULL,
+  parent_comment_id TEXT,
+  agent_original_content TEXT,
+  reply_comment_id TEXT NOT NULL UNIQUE,
+  reply_author TEXT NOT NULL,
+  reply_content TEXT NOT NULL,
+  depth INTEGER NOT NULL DEFAULT 0,
+  is_read INTEGER NOT NULL DEFAULT 0,
+  agent_responded INTEGER NOT NULL DEFAULT 0,
+  discovered_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_inbox_read ON reply_inbox(is_read);
+CREATE INDEX IF NOT EXISTS idx_inbox_time ON reply_inbox(discovered_at DESC);

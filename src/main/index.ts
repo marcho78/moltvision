@@ -2,6 +2,7 @@ import { app, BrowserWindow, ipcMain } from 'electron'
 import log from 'electron-log'
 import { initDb, closeDb } from './db/index'
 import { resetAllRateLimits } from './db/queries/rate-limits.queries'
+import { autopilotService } from './services/autopilot.service'
 import { createMainWindow } from './window'
 import { registerAllHandlers } from './ipc/index'
 
@@ -33,6 +34,9 @@ if (!gotTheLock) {
     // Reset client-side rate limits on startup (stale from previous session)
     resetAllRateLimits()
     log.info('Rate limits reset for new session')
+
+    // Load persisted autopilot persona
+    autopilotService.loadPersistedPersona()
 
     // Create main window
     mainWindow = createMainWindow()

@@ -3,7 +3,7 @@ import * as d3 from 'd3'
 import { useStore } from '../../stores'
 import { invoke } from '../../lib/ipc'
 import { IPC } from '@shared/ipc-channels'
-import type { GalaxyNode, GalaxyEdge } from '@shared/domain.types'
+import type { GalaxyNode, GalaxyEdge, AgentPersona } from '@shared/domain.types'
 
 // --- Helpers ---
 
@@ -501,8 +501,9 @@ function ForceGraph({ nodes, edges, selectedId, onSelect, pagination }: {
 // --- Detail Sidebar ---
 
 function SubmoltDetailSidebar() {
-  const { selectedSubmoltDetail, setSelectedSubmoltDetail, galaxyNodes, setGalaxyData, galaxyEdges, addNotification, submolts, setSubmolts } = useStore()
+  const { selectedSubmoltDetail, setSelectedSubmoltDetail, galaxyNodes, setGalaxyData, galaxyEdges, addNotification, submolts, setSubmolts, activePersonaId, savedPersonas, setSavedPersonas } = useStore()
   const [subscribing, setSubscribing] = useState(false)
+  const [deploying, setDeploying] = useState(false)
 
   if (!selectedSubmoltDetail) return null
 
@@ -628,6 +629,59 @@ function SubmoltDetailSidebar() {
             : (sub.is_subscribed ? 'Unsubscribe' : 'Subscribe')
           }
         </button>
+
+        {/* Deploy agent */}
+        {(() => {
+          const persona = savedPersonas.find(p => p.id === activePersonaId) ?? null
+          const isTargeted = persona ? persona.submolt_priorities?.[sub.name] !== undefined : false
+
+          const handleDeployAgent = async () => {
+            if (!persona) {
+              addNotification('No persona selected. Go to Autopilot to select one.', 'warning')
+              return
+            }
+            setDeploying(true)
+            try {
+              const newPriorities = { ...persona.submolt_priorities }
+              if (isTargeted) {
+                delete newPriorities[sub.name]
+              } else {
+                newPriorities[sub.name] = 5
+              }
+              const updated = { ...persona, submolt_priorities: newPriorities }
+              await invoke(IPC.PERSONA_SAVE, { persona: updated })
+              const personas = await invoke<AgentPersona[]>(IPC.PERSONA_LIST)
+              setSavedPersonas(personas)
+              addNotification(
+                isTargeted
+                  ? `Removed m/${sub.name} from agent targets`
+                  : `Agent now targeting m/${sub.name}`,
+                isTargeted ? 'info' : 'success'
+              )
+            } catch (err: any) {
+              addNotification(err.message || 'Failed to update agent targets', 'error')
+            } finally {
+              setDeploying(false)
+            }
+          }
+
+          return (
+            <button
+              onClick={handleDeployAgent}
+              disabled={deploying}
+              className={`mt-2 w-full py-3 rounded-xl text-sm font-semibold transition-all ${
+                isTargeted
+                  ? 'bg-molt-accent/10 border border-molt-accent/30 text-molt-accent hover:bg-molt-accent/20'
+                  : 'bg-molt-accent/20 border-2 border-molt-accent text-molt-accent hover:bg-molt-accent/30'
+              } disabled:opacity-50 disabled:pointer-events-none`}
+            >
+              {deploying
+                ? (isTargeted ? 'Removing...' : 'Deploying...')
+                : (isTargeted ? 'Agent Targeting (click to remove)' : 'Deploy Agent Here')
+              }
+            </button>
+          )
+        })()}
 
         {/* View feed */}
         <button

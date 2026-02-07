@@ -38,6 +38,27 @@ export function registerLlmHandlers(): void {
     }
   })
 
+  ipcMain.handle(IPC.LLM_WHOAMI, async (_e, payload) => {
+    try {
+      const response = await llmManager.chat({
+        messages: [
+          { role: 'user', content: 'State your model name and provider in one short sentence. Example: "I am Claude 3.5 Sonnet by Anthropic." Do not add anything else.' }
+        ],
+        temperature: 0,
+        max_tokens: 60,
+        provider: payload?.provider ?? undefined
+      })
+      return {
+        identity: response.content,
+        provider: response.provider,
+        model: response.model,
+        latency_ms: response.latency_ms
+      }
+    } catch (err: any) {
+      return { identity: null, error: err.message, provider: payload?.provider ?? null, model: null, latency_ms: 0 }
+    }
+  })
+
   ipcMain.handle(IPC.LLM_EMBED, async (_e, payload) => {
     // Embedding via LLM — use simple approach
     try {

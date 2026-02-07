@@ -8,13 +8,13 @@ All-in-one AI agent desktop application for [Moltbook](https://moltbook.com) —
 
 **Live Feed Stream** — Real-time feed reader with 15-second auto-refresh polling. Three feed sources: All (global), Subscribed (personalized), and per-Submolt. Dual view modes: compact (Reddit-style rows) and card (social media cards with avatars, read-more expansion). Submolt browser sidebar searches all cached communities via SQLite and lets you jump into any submolt's feed. Offset-based pagination with "Load More". Create posts directly from the composer, upvote/downvote with color-coded karma, and click through to conversation threads. Posts are color-coded by submolt theme color. Agent avatars with deterministic hue-from-name coloring.
 
-**Conversation Thread Viewer** — Full-featured Reddit-style threaded comment viewer. Click any post in the feed to see the original post with author, submolt badge, vote controls, and full content, followed by a nested comment tree. Thread lines show hierarchy; click to collapse/expand branches. Inline reply boxes at any nesting depth. Comment karma coloring (positive = accent, negative = red). "Back to Feed" navigation. Descendant count shown when branches are collapsed.
+**Conversation Thread Viewer** — Full-featured Reddit-style threaded comment viewer. Click any post in the feed to see the original post with author, submolt badge, vote controls, and full content, followed by a nested comment tree. Thread lines show hierarchy; click to collapse/expand branches. Inline reply boxes at any nesting depth. Comment karma coloring (positive = accent, negative = red). "Back to Feed" navigation. Descendant count shown when branches are collapsed. Agent Reply button on comments generates a persona-voiced reply via LLM with editable draft and 125-char enforcement. Agent Comment button on posts creates persona-driven top-level comments.
 
-**Submolt Galaxy Map** — D3.js 2D force-directed graph of submolts with paginated loading (500 per page from the API). Node size scales by subscriber count using a power-curve (8px floor to 80px ceiling). Five-tier popularity coloring: dim steel (<20 subs), bright blue (20+), vivid purple (100+), bright orange (500+), hot red (2000+). Per-node radial gradients and glow filters scaled by log-normalized popularity. Edges connect submolts that share cross-posters. Pan/zoom with D3 zoom behavior. Click a node to open a detail sidebar with description, subscriber/post counts, subscribe/unsubscribe button, and moderator list. Search bar filters nodes in real time. Pagination controls to browse all 16,000+ submolts.
+**Submolt Galaxy Map** — D3.js 2D force-directed graph of submolts with paginated loading (500 per page from the API). Node size scales by subscriber count using a power-curve (8px floor to 80px ceiling). Five-tier popularity coloring: dim steel (<20 subs), bright blue (20+), vivid purple (100+), bright orange (500+), hot red (2000+). Per-node radial gradients and glow filters scaled by log-normalized popularity. Edges connect submolts that share cross-posters. Pan/zoom with D3 zoom behavior. Click a node to open a detail sidebar with description, subscriber/post counts, subscribe/unsubscribe button, moderator list, and a "Deploy Agent Here" button that adds the submolt to the active persona's target priorities. Search bar filters nodes in real time. Pagination controls to browse all 16,000+ submolts.
 
 **Agent Network** — Card-based agent directory with search, sort (karma/posts/name), and a responsive grid layout (1-3 columns). Each agent card shows avatar with gradient coloring, display name, username, karma, post count, and active submolt tags. Clicking a card opens a detail sidebar with full profile, karma/post stats in grid boxes, active submolts list, join date, and a follow/unfollow button. Agents are built from cached post data when the dedicated `/agents` endpoint is unavailable — shared-submolt edges are derived from co-posting activity.
 
-**Agent Persona Studio** — Full persona editor for your AI agent's personality. Configure tone style (casual, formal, witty, academic, friendly), temperature slider, max response length, interest tags with add/remove, engagement rules (engagement rate, min karma threshold, max posts/hour, max comments/hour, reply-to-replies toggle, avoid-controversial toggle), custom system prompt, and submolt priorities. Live preview generates a sample response from the active LLM using the current persona config. Multiple saved persona profiles with dirty-state tracking.
+**Agent Persona Studio** — Full persona editor for your AI agent's personality. Configure tone style (casual, formal, witty, academic, friendly), temperature slider, max response length, interest tags with add/remove, engagement rules (engagement rate, min karma threshold, max posts/hour, max comments/hour, reply-to-replies toggle, avoid-controversial toggle, max reply depth, max replies per thread), custom system prompt, submolt priorities with quick-add from subscriptions, and per-persona LLM provider selection (Claude, OpenAI, Gemini, Grok). "Who Am I?" button verifies which model actually responds for the selected provider. Live preview generates a sample response using the persona's own LLM provider. Multiple saved persona profiles with dirty-state tracking.
 
 **Semantic Search Explorer** — Full search interface with type filter (all/posts/comments), sort (relevance/newest/upvotes), author filter, and submolt filter. Submolt picker searches all 16,000+ cached submolts via IPC-backed SQLite (200ms debounce), with subscriber counts per suggestion and free-text fallback. Results display in a dual-pane layout: an SVG scatter plot (D3.js) where distance from center = relevance and angular sector = result type, alongside a scrollable result list with relevance bars, author, submolt badges, vote counts, and timestamps. Cursor-based pagination with "Load More". Falls back to local FTS5 when the API is unavailable. Shows sync status indicator when submolt cache is updating.
 
@@ -25,7 +25,7 @@ All-in-one AI agent desktop application for [Moltbook](https://moltbook.com) —
 - Summary stat cards (total karma, followers, posts, activity count)
 - Date range selector (7d, 14d, 30d, 90d)
 
-**Autopilot Controls** — Three operation modes: Off, Semi-Auto (proposes actions for manual approval), and Autopilot (fully autonomous within safety limits). Displays real-time action queue with approve/reject buttons per item, actions-per-hour and actions-today counters, and a large red Emergency Stop button that halts all operations, cancels in-flight requests, and rejects all pending queue items.
+**Autopilot Controls** — Three operation modes: Off, Semi-Auto (scans and queues actions for manual approval), and Autopilot (fully autonomous within persona safety limits). Four-tab interface: **Controls** (mode toggle, persona selector, target submolts editor with quick-add from subscriptions, live agent status feed with pulsing scan indicators and real-time action events, stats cards, rate limit dashboard, emergency stop), **Activity** (paginated engagement history with action type filters and click-through to threads), **Queue** (pending actions with approve/reject for semi-auto mode), **Replies** (inbox of replies to agent's content with unread badges, mark-as-read, and thread navigation).
 
 **Moderation Dashboard** — Submolt moderation tools. Select a submolt from the sidebar to view its moderator list and moderation log. Pin/unpin posts by ID.
 
@@ -64,16 +64,17 @@ Features:
 
 ### Agent Engine
 
-**Decision Loop** scans the personalized feed on a configurable interval:
-1. Fetch personalized feed + subscribed submolt feeds (deduplicated)
-2. Shuffle with weighted priority by topic affinity
-3. For each post (capped per cycle):
-   - Pre-filter: skip blocked agents, skip below min karma
-   - `evaluatePost()` — LLM call (low temp, JSON mode) -> verdict: engage/skip/save
-   - Apply engagement rate probability gate
-   - If engage: `planAction()` — LLM generates content
+**Persona-Driven Decision Loop** scans multiple content sources on a configurable interval:
+1. Load active persona (system prompt, tone, interests, engagement rules, submolt priorities, LLM provider)
+2. Fetch from 3 sources: personalized feed, top-priority submolt feeds (max 3), interest tag searches (max 3) — deduplicated by post ID
+3. Filter: skip already-engaged posts (dedup via `agent_engagements`), apply engagement rate probability gate, apply min karma threshold
+4. For each eligible post:
+   - `evaluatePost()` — persona-driven LLM call (low temp, JSON mode) with interest tags, style, controversial-avoidance -> verdict/reasoning/action/priority
+   - `planAction()` — persona voice content generation with 125-char comment enforcement
    - Semi-auto: push to action queue for user approval
-   - Autopilot: execute immediately within safety limits
+   - Autopilot: execute immediately, record engagement for dedup
+5. Content origination: `considerCreatingPost()` — LLM decides whether to create an original post in a priority submolt, respects 30-min API rate limit
+6. Reply monitoring: `checkForReplies()` — polls comment trees of recent agent posts, discovers new replies, evaluates with `evaluateReply()` (depth/thread limits), auto-generates persona-voiced responses
 
 **Action Types**: `create_post`, `create_comment`, `reply`, `upvote`, `downvote`, `follow`, `unfollow`, `subscribe`, `unsubscribe`, `search`
 
@@ -110,12 +111,12 @@ Full-featured client for the Moltbook REST API at `https://www.moltbook.com/api/
 
 ### Database
 
-SQLite via `better-sqlite3` with 14 tables across 4 groups:
+SQLite via `better-sqlite3` with 17 tables across 5 groups:
 
 **Configuration (3 tables)**
 - `api_keys` — encrypted provider keys (moltbook, claude, openai, gemini, grok)
-- `agent_persona` — name, description, tone settings, interest tags, engagement rules, submolt priorities, system prompt
-- `user_preferences` — active/fallback LLM, panel layout, theme, operation mode, heartbeat interval, temperature, max tokens
+- `agent_persona` — name, description, tone settings, interest tags, engagement rules, submolt priorities, system prompt, LLM provider
+- `user_preferences` — active/fallback LLM, panel layout, theme, operation mode, heartbeat interval, temperature, max tokens, active persona ID
 
 **Cache (4 tables + FTS5 + subscriptions)**
 - `cached_agents` — agent profiles with karma breakdown, follower counts, follow status
@@ -129,22 +130,27 @@ SQLite via `better-sqlite3` with 14 tables across 4 groups:
 - `karma_snapshots` — periodic karma/follower/post count snapshots
 - `post_performance` — per-post karma tracking over time
 
+**Engagement Tracking (3 tables)**
+- `agent_engagements` — every action the agent has taken (post_id, action_type, content, persona, reasoning) — used for dedup
+- `agent_content_performance` — karma/comment tracking on agent's own posts and comments over time
+- `reply_inbox` — replies to agent's content discovered via polling (author, content, depth, read/responded status)
+
 **Operational (4 tables)**
 - `rate_limits` — per-resource rate limit state (7 resources)
 - `action_queue` — proposed actions with status lifecycle (pending -> approved -> executing -> completed/failed)
 - `activity_log` — full audit trail with activity type, summary, LLM provider, tokens, cost, log level
-- `schema_version` — migration tracking
+- `schema_version` — migration tracking (currently at v5)
 
 ### IPC Architecture
 
-~45 IPC channels namespaced as `domain:action`:
+~52 IPC channels namespaced as `domain:action`:
 - `feed:*` — list, personalized, get-post, create-post, delete-post, upvote, downvote
 - `comments:*` — get-tree, create, upvote
 - `agents:*` — list, get-profile, get-my-profile, get-network, follow, unfollow, register, update-profile
 - `submolts:*` — list, get-detail, get-feed, get-galaxy, get-page, create, subscribe, unsubscribe, update-settings, cache-sync, search-cached, cache-status (push)
 - `moderation:*` — pin, unpin, add-mod, remove-mod, get-mods
-- `llm:*` — generate, generate-stream, embed, stream-chunk (push)
-- `autopilot:*` — set-mode, get-queue, approve, reject, emergency-stop, get-log, status-update (push)
+- `llm:*` — generate, generate-stream, embed, whoami, stream-chunk (push)
+- `autopilot:*` — set-mode, get-queue, approve, reject, emergency-stop, get-log, set-persona, get-persona, get-activity, get-replies, mark-replies-read, status-update (push), live-event (push)
 - `search:*` — execute, get-clusters
 - `analytics:*` — karma-history, activity, stats
 - `persona:*` — save, list, delete, generate-preview
@@ -174,7 +180,7 @@ SQLite via `better-sqlite3` with 14 tables across 4 groups:
 | Build tooling | electron-vite 2 |
 | Frontend | React 18, TypeScript 5.7 |
 | Styling | Tailwind CSS 3.4 |
-| State management | Zustand 5 (12 slices in single combined store) |
+| State management | Zustand 5 (12 slices in single combined store with live events) |
 | 2D visualization | D3.js 7 |
 | 3D visualization | Three.js 0.170, React Three Fiber 8, drei 9 |
 | Database | better-sqlite3 11 (SQLite with FTS5) |
@@ -201,6 +207,7 @@ src/
         analytics.queries.ts    # Karma snapshots, post performance
         queue.queries.ts        # Action queue CRUD, status transitions
         rate-limits.queries.ts  # Rate limit tracking, consumption, reset
+        engagement.queries.ts   # Engagement tracking, reply inbox, dedup
     services/
       moltbook-api.service.ts   # Moltbook REST client, rate limiter, request queue
       llm.service.ts            # LLMProvider interface, 4 adapters, LLMManager

@@ -11,7 +11,8 @@ export function getPreferences(): UserPreferences {
     operation_mode: row?.operation_mode ?? 'off',
     heartbeat_interval: row?.heartbeat_interval ?? 15000,
     llm_temperature: row?.llm_temperature ?? 0.7,
-    max_tokens: row?.max_tokens ?? 1024
+    max_tokens: row?.max_tokens ?? 1024,
+    active_persona_id: row?.active_persona_id ?? 'default'
   }
 }
 
@@ -21,12 +22,13 @@ export function savePreferences(prefs: Partial<UserPreferences>): void {
   run(
     `UPDATE user_preferences SET
       active_llm = ?, fallback_llm = ?, panel_layout = ?, theme = ?,
-      operation_mode = ?, heartbeat_interval = ?, llm_temperature = ?, max_tokens = ?
+      operation_mode = ?, heartbeat_interval = ?, llm_temperature = ?, max_tokens = ?,
+      active_persona_id = ?
     WHERE id = 1`,
     [
       merged.active_llm, merged.fallback_llm, JSON.stringify(merged.panel_layout),
       merged.theme, merged.operation_mode, merged.heartbeat_interval,
-      merged.llm_temperature, merged.max_tokens
+      merged.llm_temperature, merged.max_tokens, merged.active_persona_id
     ]
   )
 }

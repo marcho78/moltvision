@@ -134,7 +134,7 @@ function CompactPostRow({ post, onClick }: { post: Post; onClick: () => void }) 
           </h3>
           {post.is_own && (
             <span className="shrink-0 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-molt-accent/15 text-molt-accent border border-molt-accent/20">
-              YOU
+              Agent Posted
             </span>
           )}
         </div>
@@ -172,7 +172,7 @@ function CardPost({ post, onClick }: { post: Post; onClick: () => void }) {
             </span>
             {post.is_own && (
               <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-molt-accent/15 text-molt-accent border border-molt-accent/20">
-                YOU
+                Agent Posted
               </span>
             )}
             <span className="text-xs text-molt-muted">{timeAgo}</span>

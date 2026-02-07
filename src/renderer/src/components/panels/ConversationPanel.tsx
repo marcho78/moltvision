@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react'
 import { useStore } from '../../stores'
 import { invoke } from '../../lib/ipc'
 import { IPC } from '@shared/ipc-channels'
-import type { Post, Comment, VoteDirection } from '@shared/domain.types'
+import type { Post, Comment, VoteDirection, AgentPersona } from '@shared/domain.types'
 
 // ─── Icons ──────────────────────────────────────────────
 
@@ -162,12 +162,124 @@ function ReplyBox({ postId, parentId, onClose, onSubmitted }: {
   )
 }
 
+// ─── Agent Reply Generator ───────────────────────────────
+
+function AgentReplyBox({ postId, parentId, postTitle, postContent, commentContent, onClose, onSubmitted }: {
+  postId: string; parentId?: string; postTitle: string; postContent: string; commentContent: string
+  onClose: () => void; onSubmitted: () => void
+}) {
+  const [draft, setDraft] = useState('')
+  const [generating, setGenerating] = useState(false)
+  const [submitting, setSubmitting] = useState(false)
+  const { addNotification } = useStore()
+
+  const generateReply = async () => {
+    setGenerating(true)
+    try {
+      // Load the active persona to use for generation
+      const personas = await invoke<AgentPersona[]>(IPC.PERSONA_LIST)
+      const { persona_id } = await invoke<{ persona_id: string }>(IPC.AUTOPILOT_GET_PERSONA)
+      const persona = personas.find(p => p.id === persona_id) ?? personas[0]
+
+      if (!persona) {
+        addNotification('No persona configured. Set one in Persona Studio.', 'warning')
+        setGenerating(false)
+        return
+      }
+
+      const response = await invoke<{ content: string }>(IPC.LLM_GENERATE, {
+        messages: [
+          {
+            role: 'system',
+            content: `${persona.system_prompt}\n\nYou are writing a reply comment on Moltbook. Style: ${persona.tone_settings?.style ?? 'friendly'}.\n\nCRITICAL: Your reply must be 125 characters or fewer. This is a hard API limit. Be concise but insightful.\n\nRespond with the comment text directly, no JSON wrapping.`
+          },
+          {
+            role: 'user',
+            content: `Post context:\nTitle: ${postTitle}\nContent: ${postContent}\n\nComment you're replying to:\n${commentContent}\n\nWrite a natural, brief reply (max 125 chars).`
+          }
+        ],
+        temperature: persona.tone_settings?.temperature ?? 0.7,
+        max_tokens: 150,
+        provider: persona.llm_provider ?? undefined
+      })
+
+      let text = response.content ?? ''
+      if (text.length > 125) text = text.slice(0, 122) + '...'
+      setDraft(text)
+    } catch (err: any) {
+      addNotification(err.message || 'Failed to generate reply', 'error')
+    } finally {
+      setGenerating(false)
+    }
+  }
+
+  useEffect(() => { generateReply() }, [])
+
+  const handleSubmit = async () => {
+    if (!draft.trim()) return
+    setSubmitting(true)
+    try {
+      let text = draft.trim()
+      if (text.length > 125) text = text.slice(0, 122) + '...'
+      await invoke(IPC.COMMENTS_CREATE, { post_id: postId, content: text, parent_id: parentId })
+      addNotification('Agent reply posted!', 'success')
+      setDraft('')
+      onClose()
+      onSubmitted()
+    } catch (err: any) {
+      addNotification(err.message || 'Failed to post agent reply', 'error')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  const charCount = draft.length
+  const charColor = charCount > 125 ? 'text-molt-error' : charCount > 110 ? 'text-molt-warning' : 'text-molt-muted'
+
+  return (
+    <div className="mt-2 ml-8 border border-molt-accent/20 rounded-lg p-2 bg-molt-accent/5">
+      <div className="flex items-center gap-1.5 mb-1.5">
+        <span className="text-[10px] font-semibold text-molt-accent">Agent Reply</span>
+        {generating && (
+          <span className="text-[10px] text-molt-muted flex items-center gap-1">
+            <svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2"
+              className="animate-spin" strokeLinecap="round"><path d="M14 8A6 6 0 112.5 5.5" /></svg>
+            Generating...
+          </span>
+        )}
+      </div>
+      <textarea
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        placeholder="Agent-generated reply..."
+        rows={2}
+        maxLength={125}
+        className="input-field w-full text-sm resize-none"
+      />
+      <div className="flex items-center justify-between mt-1.5">
+        <span className={`text-[10px] ${charColor}`}>{charCount}/125</span>
+        <div className="flex gap-2">
+          <button onClick={onClose} className="text-xs text-molt-muted hover:text-molt-text px-2 py-1">Cancel</button>
+          <button onClick={generateReply} className="text-xs text-molt-accent hover:text-molt-accent-hover px-2 py-1" disabled={generating}>
+            Regenerate
+          </button>
+          <button onClick={handleSubmit} className="btn-primary text-xs py-1 px-3"
+            disabled={submitting || !draft.trim() || generating}>
+            {submitting ? 'Posting...' : 'Send'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ─── Single Comment ─────────────────────────────────────
 
-function CommentItem({ comment, postId, depth, onRefresh }: {
-  comment: Comment; postId: string; depth: number; onRefresh: () => void
+function CommentItem({ comment, postId, depth, onRefresh, postTitle, postContent }: {
+  comment: Comment; postId: string; depth: number; onRefresh: () => void; postTitle?: string; postContent?: string
 }) {
   const [replying, setReplying] = useState(false)
+  const [agentReplying, setAgentReplying] = useState(false)
   const [collapsed, setCollapsed] = useState(false)
   const timeAgo = getTimeAgo(comment.created_at)
   const children = comment.children ?? []
@@ -224,6 +336,10 @@ function CommentItem({ comment, postId, depth, onRefresh }: {
                 className="text-xs text-molt-muted hover:text-molt-text transition-colors">
                 Reply
               </button>
+              <button onClick={() => setAgentReplying(!agentReplying)}
+                className="text-xs text-molt-accent/60 hover:text-molt-accent transition-colors">
+                Agent Reply
+              </button>
             </div>
 
             {replying && (
@@ -231,10 +347,22 @@ function CommentItem({ comment, postId, depth, onRefresh }: {
                 onClose={() => setReplying(false)} onSubmitted={onRefresh} />
             )}
 
+            {agentReplying && (
+              <AgentReplyBox
+                postId={postId}
+                parentId={comment.id}
+                postTitle={postTitle ?? ''}
+                postContent={postContent ?? ''}
+                commentContent={comment.content}
+                onClose={() => setAgentReplying(false)}
+                onSubmitted={onRefresh}
+              />
+            )}
+
             {/* Children */}
             {children.map((child) => (
               <CommentItem key={child.id} comment={child} postId={postId}
-                depth={depth + 1} onRefresh={onRefresh} />
+                depth={depth + 1} onRefresh={onRefresh} postTitle={postTitle} postContent={postContent} />
             ))}
           </>
         )}
@@ -249,6 +377,7 @@ function ThreadView({ post, comments, postId, onRefresh }: {
   post: Post | null; comments: Comment[]; postId: string; onRefresh: () => void
 }) {
   const [replyingToPost, setReplyingToPost] = useState(false)
+  const [agentReplyingToPost, setAgentReplyingToPost] = useState(false)
   const tree = buildTree(comments)
 
   return (
@@ -261,14 +390,31 @@ function ThreadView({ post, comments, postId, onRefresh }: {
           <span className="text-sm font-medium text-molt-text">
             {comments.length} {comments.length === 1 ? 'Comment' : 'Comments'}
           </span>
-          <button onClick={() => setReplyingToPost(!replyingToPost)}
-            className="btn-primary text-xs py-1 px-3">
-            + Comment
-          </button>
+          <div className="flex gap-2">
+            <button onClick={() => { setAgentReplyingToPost(!agentReplyingToPost); setReplyingToPost(false) }}
+              className="btn-secondary text-xs py-1 px-3 text-molt-accent border-molt-accent/30">
+              Agent Comment
+            </button>
+            <button onClick={() => { setReplyingToPost(!replyingToPost); setAgentReplyingToPost(false) }}
+              className="btn-primary text-xs py-1 px-3">
+              + Comment
+            </button>
+          </div>
         </div>
 
         {replyingToPost && (
           <ReplyBox postId={postId} onClose={() => setReplyingToPost(false)} onSubmitted={onRefresh} />
+        )}
+
+        {agentReplyingToPost && post && (
+          <AgentReplyBox
+            postId={postId}
+            postTitle={post.title}
+            postContent={post.content}
+            commentContent={post.content}
+            onClose={() => setAgentReplyingToPost(false)}
+            onSubmitted={onRefresh}
+          />
         )}
 
         {/* Comment tree */}
@@ -279,7 +425,7 @@ function ThreadView({ post, comments, postId, onRefresh }: {
         )}
         {tree.map((comment) => (
           <CommentItem key={comment.id} comment={comment} postId={postId}
-            depth={0} onRefresh={onRefresh} />
+            depth={0} onRefresh={onRefresh} postTitle={post?.title} postContent={post?.content} />
         ))}
       </div>
     </div>

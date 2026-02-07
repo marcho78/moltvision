@@ -1,5 +1,112 @@
 # Changelog
 
+## 1.2.0 — 2026-02-07
+
+Autonomous agent conversation system — persona-driven decision-making, engagement tracking, content origination, reply monitoring, and real-time observability.
+
+### Autopilot Service (Rewritten)
+- Persona-driven decision loop: `loadPersona()` reads active persona from DB at start of every scan cycle — system prompt, tone, interests, engagement rules, and submolt priorities now control all LLM evaluations
+- Multi-source content discovery: personalized feed + top 3 priority submolt feeds + top 3 interest tag searches, deduplicated by post ID
+- Engagement dedup: `hasEngaged()` check prevents re-engaging the same post across cycles
+- Engagement rate probability gate and min_karma_threshold filter applied before evaluation
+- `evaluatePost()` rewritten: persona system prompt, interest tags, controversial-topic avoidance, outputs verdict/reasoning/action/priority as structured JSON
+- `planAction()` rewritten: persona voice for content generation, 125-char hard limit enforcement for comments, vote actions skip LLM call
+- Content origination: `considerCreatingPost()` — LLM decides whether to create an original post, picks submolt from priorities, generates title+content. Respects 30-min API rate limit and persona `max_posts_per_hour`
+- Reply monitoring: `checkForReplies()` polls comment trees of recent agent posts (last 24h, max 5), discovers new replies, inserts into `reply_inbox` with dedup. `evaluateReply()` decides whether to respond based on thread depth and reply count limits
+- Reply generation: `generateReply()` produces persona-voiced replies (125-char limit), auto-executes in autopilot, queues in semi-auto
+- Per-persona LLM provider: all 4 LLM calls (evaluate, evaluateReply, plan, considerCreating) pass `provider: persona.llm_provider`
+- Semi-auto fix: both semi-auto and autopilot modes now call `start()` so scanning runs in both modes (previously semi-auto called `stopTimer()` and never scanned)
+- First scan runs immediately on mode activation (no longer waits for interval)
+- `scan:progress` events emitted at 6 points in cycle (start, feed, submolt, evaluate, done, error) for real-time UI updates
+- `action:executed` event includes full payload details (action type, submolt, post ID, content preview, title)
+- Active persona persisted to `user_preferences.active_persona_id` — survives app restart
+- `loadPersistedPersona()` called on app startup after DB init
+
+### Engagement Tracking Database (3 New Tables)
+- `agent_engagements` — records every action the agent takes (post_id, comment_id, action_type, content_sent, persona_id, reasoning). Indexed on post, type, and time. Used for dedup and activity history
+- `agent_content_performance` — tracks karma/replies on agent's own content over time (karma_at_creation, karma_current, comment_count, last_checked_at)
+- `reply_inbox` — replies to the agent's posts/comments discovered via polling (parent context, reply author/content, depth, read status, agent_responded flag). UNIQUE on reply_comment_id prevents dupes
+- Migration v3: version bump for engagement tables (created via `CREATE IF NOT EXISTS` in schema)
+
+### Per-Persona LLM Provider Selection
+- `llm_provider` column added to `agent_persona` table (default: 'claude')
+- Migration v4: `ALTER TABLE agent_persona ADD COLUMN llm_provider`
+- Persona save/load includes `llm_provider` field
+- `PERSONA_GENERATE_PREVIEW` accepts `provider` override, returns `provider_used`
+
+### Active Persona Persistence
+- `active_persona_id` column added to `user_preferences` (default: 'default')
+- Migration v5: `ALTER TABLE user_preferences ADD COLUMN active_persona_id`
+- `setActivePersona()` persists to DB, `loadPersistedPersona()` restores on startup
+- Settings save/load includes `active_persona_id`
+
+### Who Am I — LLM Identity Verification
+- New IPC channel `llm:whoami` — asks the selected LLM to state its model name and provider in one sentence
+- Returns identity string, provider, model, and latency
+- UI button in Persona Studio shows which model is actually responding for the selected provider
+
+### AutopilotPanel (Redesigned — 4 Tabs)
+- Tab bar: Controls, Activity, Queue, Replies with unread/pending badges
+- **Controls tab**: mode toggle, persona selector dropdown, target submolts editor (quick-add from subscriptions, manual add, priority sliders, remove), live agent status feed (pulsing scan indicator, recent action events with color-coded badges), stats cards (actions/hour, actions/today, status), rate limit dashboard bars, emergency stop
+- **Activity tab**: paginated engagement history from `agent_engagements`, filter by action type (posts/comments/votes), click-through to conversation panel, action type badges, timestamps, content previews and reasoning
+- **Queue tab**: action queue with approve/reject for semi-auto mode, pending count display
+- **Replies tab**: reply inbox from `reply_inbox` table, unread indicator dots, "Mark all as read", per-reply "View Thread" and "Mark Read" buttons, shows agent's original content as context
+
+### PersonaStudioPanel (Enhanced)
+- LLM provider selector dropdown per persona (Claude, OpenAI, Gemini, Grok)
+- "Who Am I?" button with loading state — verifies which model responds for the selected provider
+- Submolt priority editor: quick-add from subscriptions, manual entry, priority 1-10 sliders, remove buttons
+
+### ConversationPanel (Enhanced)
+- Agent Reply button on comments: generates persona-voiced reply via LLM, editable draft, 125-char enforcement, submit with `/comments` API
+- Agent top-level Comment button on posts: same agent reply flow but creates a top-level comment (no parent_id)
+- Fixed: AgentReplyBox now passes `provider: persona.llm_provider` to LLM generate call
+
+### GalaxyMapPanel (Enhanced)
+- "Deploy Agent Here" button in submolt detail sidebar: adds the selected submolt to the active persona's `submolt_priorities` with priority 5
+- "Agent Targeting" indicator with click-to-remove when submolt is already in priorities
+- Loads and saves persona via `PERSONA_SAVE` IPC
+
+### LiveFeedPanel (Enhanced)
+- Agent post indicators: posts created by the agent show subtle visual differentiation
+
+### AnalyticsPanel (Enhanced)
+- Agent Performance section: total posts, comments, upvotes, downvotes from `agent_engagements` data, total engagement count
+
+### Real-Time Observability
+- New push channel `autopilot:live-event` — forwards scan progress and action events from main process to renderer
+- `useAutopilotEvents` hook: listens to both `autopilot:status-update` and `autopilot:live-event`
+- `LiveEvent` type in Zustand store: type, timestamp, phase, message, action_type, submolt, post_id, content, title
+- Store keeps last 50 events via `addLiveEvent()` with FIFO trimming
+
+### New IPC Channels
+- `llm:whoami` — LLM identity verification
+- `autopilot:live-event` — push channel for scan progress and action events
+- `autopilot:set-persona` — set active persona for autopilot
+- `autopilot:get-persona` — get currently active persona ID
+- `autopilot:get-activity` — paginated engagement history
+- `autopilot:get-replies` — reply inbox with unread count
+- `autopilot:mark-replies-read` — batch mark replies as read
+
+### Preload (Updated)
+- Added `llm:whoami` to allowed invoke channels
+- Added `autopilot:set-persona`, `autopilot:get-persona`, `autopilot:get-activity`, `autopilot:get-replies`, `autopilot:mark-replies-read` to allowed invoke channels
+- Added `autopilot:live-event` to allowed push event channels
+
+### Zustand Store (Extended)
+- AutopilotSlice: added `activePersonaId`, `agentActivity`, `replyInbox`, `unreadReplyCount`, `liveEvents` state fields
+- Added `setActivePersonaId`, `setAgentActivity`, `setReplyInbox`, `setUnreadReplyCount`, `addLiveEvent` actions
+- `LiveEvent` interface for real-time scan/action events
+
+### Domain Types (Extended)
+- `AgentEngagement` interface (id, post_id, comment_id, action_type, content_sent, persona_id, reasoning, created_at)
+- `ReplyInboxEntry` interface (id, parent_post_id, parent_comment_id, agent_original_content, reply_comment_id, reply_author, reply_content, depth, is_read, agent_responded, discovered_at)
+- `UserPreferences`: added `active_persona_id` field
+- `EngagementRules`: added `max_reply_depth` (default 3), `max_replies_per_thread` (default 2)
+
+### New File
+- `src/main/db/queries/engagement.queries.ts` — all engagement tracking, performance, and reply inbox query helpers (recordEngagement, hasEngaged, countEngagementsInPeriod, getEngagementHistory, countRepliesInThread, addToReplyInbox, getUnrespondedReplies, markReplyResponded, getRecentAgentPostIds, getAllReplies, getUnreadReplyCount, markRepliesRead)
+
 ## 1.1.0 — 2026-02-07
 
 Major overhaul of all panels, API response handling, submolt caching, feed system, and UI resilience.

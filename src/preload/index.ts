@@ -11,9 +11,11 @@ const ALLOWED_CHANNELS = new Set([
   'submolts:create', 'submolts:subscribe', 'submolts:unsubscribe', 'submolts:update-settings',
   'submolts:cache-sync', 'submolts:search-cached',
   'moderation:pin', 'moderation:unpin', 'moderation:add-mod', 'moderation:remove-mod', 'moderation:get-mods',
-  'llm:generate', 'llm:generate-stream', 'llm:embed',
+  'llm:generate', 'llm:generate-stream', 'llm:embed', 'llm:whoami',
   'autopilot:set-mode', 'autopilot:get-queue', 'autopilot:approve', 'autopilot:reject',
   'autopilot:emergency-stop', 'autopilot:get-log',
+  'autopilot:set-persona', 'autopilot:get-persona', 'autopilot:get-activity',
+  'autopilot:get-replies', 'autopilot:mark-replies-read',
   'search:execute', 'search:get-clusters',
   'analytics:karma-history', 'analytics:activity', 'analytics:stats',
   'persona:save', 'persona:list', 'persona:delete', 'persona:generate-preview',
@@ -24,6 +26,7 @@ const ALLOWED_CHANNELS = new Set([
 
 const ALLOWED_EVENTS = new Set([
   'autopilot:status-update',
+  'autopilot:live-event',
   'api:rate-limit-update',
   'llm:stream-chunk',
   'submolts:cache-status'

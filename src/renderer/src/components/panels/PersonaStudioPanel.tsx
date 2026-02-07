@@ -2,7 +2,14 @@ import React, { useEffect, useState } from 'react'
 import { useStore } from '../../stores'
 import { invoke } from '../../lib/ipc'
 import { IPC } from '@shared/ipc-channels'
-import type { AgentPersona, ToneSettings, EngagementRules } from '@shared/domain.types'
+import type { AgentPersona, ToneSettings, EngagementRules, LLMProviderName } from '@shared/domain.types'
+
+const LLM_PROVIDERS: { id: LLMProviderName; label: string }[] = [
+  { id: 'claude', label: 'Claude' },
+  { id: 'openai', label: 'OpenAI' },
+  { id: 'gemini', label: 'Gemini' },
+  { id: 'grok', label: 'Grok' }
+]
 
 function ToneSliders({ tone, onChange }: { tone: ToneSettings; onChange: (t: ToneSettings) => void }) {
   const styles = ['casual', 'formal', 'witty', 'academic', 'friendly'] as const
@@ -115,9 +122,136 @@ function EngagementRulesEditor({ rules, onChange }: { rules: EngagementRules; on
   )
 }
 
+function SubmoltPriorityEditor({ priorities, onChange }: {
+  priorities: Record<string, number>; onChange: (p: Record<string, number>) => void
+}) {
+  const [addInput, setAddInput] = useState('')
+  const { submolts, setSubmolts } = useStore()
+  const entries = Object.entries(priorities).sort(([, a], [, b]) => b - a)
+
+  // Load submolts if not already loaded
+  useEffect(() => {
+    if (submolts.length === 0) {
+      invoke<{ submolts: any[] }>(IPC.SUBMOLTS_LIST)
+        .then((result: any) => {
+          const list = Array.isArray(result) ? result : (result?.submolts ?? [])
+          if (list.length > 0) setSubmolts(list)
+        })
+        .catch(() => {})
+    }
+  }, [submolts.length, setSubmolts])
+
+  const subscribedSubmolts = submolts.filter((s: any) => s.is_subscribed)
+
+  const addSubmolt = (name: string) => {
+    const clean = name.trim().replace(/^m\//, '')
+    if (!clean || priorities[clean] !== undefined) return
+    onChange({ ...priorities, [clean]: 5 })
+    setAddInput('')
+  }
+
+  const removeSubmolt = (name: string) => {
+    const next = { ...priorities }
+    delete next[name]
+    onChange(next)
+  }
+
+  const setPriority = (name: string, value: number) => {
+    onChange({ ...priorities, [name]: value })
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <h4 className="text-sm font-medium">Submolt Priorities</h4>
+        <span className="text-[10px] text-molt-muted">{entries.length} active</span>
+      </div>
+      <p className="text-[10px] text-molt-muted">
+        The autopilot will focus on these submolts. Higher priority = more attention. The agent will also create original posts in these submolts.
+      </p>
+
+      {/* Quick add from subscriptions */}
+      {subscribedSubmolts.length > 0 && (
+        <div className="space-y-1">
+          <label className="text-[10px] text-molt-muted">Add from your subscriptions:</label>
+          <div className="flex flex-wrap gap-1">
+            {subscribedSubmolts
+              .filter((s: any) => priorities[s.name] === undefined)
+              .slice(0, 12)
+              .map((s: any) => (
+                <button key={s.name} onClick={() => addSubmolt(s.name)}
+                  className="px-2 py-0.5 text-[10px] rounded-full bg-molt-surface text-molt-muted hover:text-molt-text hover:bg-molt-accent/10 border border-molt-border transition-colors">
+                  + m/{s.name}
+                </button>
+              ))}
+          </div>
+        </div>
+      )}
+
+      {/* Manual add */}
+      <div className="flex gap-2">
+        <input value={addInput} onChange={(e) => setAddInput(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && addSubmolt(addInput)}
+          placeholder="Add submolt name..." className="input-field flex-1 text-sm" />
+        <button onClick={() => addSubmolt(addInput)} className="btn-secondary text-sm">Add</button>
+      </div>
+
+      {/* Priority list */}
+      {entries.length === 0 && (
+        <div className="text-xs text-molt-muted text-center py-3 bg-molt-bg rounded-lg">
+          No submolts configured. Add submolts above to direct the agent.
+        </div>
+      )}
+      <div className="space-y-2">
+        {entries.map(([name, priority]) => (
+          <div key={name} className="flex items-center gap-2 bg-molt-bg rounded-lg px-3 py-2">
+            <span className="text-xs font-medium text-molt-text w-28 truncate" title={`m/${name}`}>m/{name}</span>
+            <input type="range" min="1" max="10" step="1" value={priority}
+              onChange={(e) => setPriority(name, parseInt(e.target.value))}
+              className="flex-1" />
+            <span className="text-xs text-molt-muted w-6 text-center">{priority}</span>
+            <button onClick={() => removeSubmolt(name)}
+              className="text-molt-muted hover:text-molt-error text-sm transition-colors">&times;</button>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function LLMProviderSelector({ value, onChange, label }: {
+  value: LLMProviderName; onChange: (provider: LLMProviderName) => void; label: string
+}) {
+  return (
+    <div>
+      <label className="text-xs text-molt-muted">{label}</label>
+      <div className="flex gap-1 mt-1">
+        {LLM_PROVIDERS.map((p) => (
+          <button
+            key={p.id}
+            onClick={() => onChange(p.id)}
+            className={`px-3 py-1.5 text-xs rounded-lg transition-colors ${
+              value === p.id
+                ? 'bg-molt-accent text-white'
+                : 'bg-molt-surface text-molt-muted hover:text-molt-text border border-molt-border'
+            }`}
+          >
+            {p.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 export function PersonaStudioPanel() {
   const { activePersona, savedPersonas, personaDirty, setActivePersona, setSavedPersonas, setPersonaDirty, addNotification } = useStore()
   const [preview, setPreview] = useState('')
+  const [previewProvider, setPreviewProvider] = useState<LLMProviderName | null>(null)
+  const [previewUsedProvider, setPreviewUsedProvider] = useState<string | null>(null)
+  const [previewing, setPreviewing] = useState(false)
+  const [whoami, setWhoami] = useState<{ identity: string; provider: string; model: string; latency_ms: number } | null>(null)
+  const [whoamiLoading, setWhoamiLoading] = useState(false)
 
   useEffect(() => {
     invoke<AgentPersona[]>(IPC.PERSONA_LIST)
@@ -143,14 +277,19 @@ export function PersonaStudioPanel() {
 
   const handlePreview = async () => {
     if (!activePersona) return
+    setPreviewing(true)
     try {
-      const result = await invoke<{ preview_response: string }>(IPC.PERSONA_GENERATE_PREVIEW, {
+      const result = await invoke<{ preview_response: string; provider_used?: string }>(IPC.PERSONA_GENERATE_PREVIEW, {
         persona: activePersona,
-        sample_post: { title: 'What is your take on AI agents?', content: 'I think AI agents are the future of social networks.' }
+        sample_post: { title: 'What is your take on AI agents?', content: 'I think AI agents are the future of social networks.' },
+        provider: previewProvider ?? undefined
       })
       setPreview(result.preview_response)
+      setPreviewUsedProvider(result.provider_used ?? null)
     } catch (err: any) {
       addNotification(err.message || 'Preview failed', 'error')
+    } finally {
+      setPreviewing(false)
     }
   }
 
@@ -158,6 +297,25 @@ export function PersonaStudioPanel() {
     if (!activePersona) return
     setActivePersona({ ...activePersona, ...updates } as AgentPersona)
     setPersonaDirty(true)
+  }
+
+  const handleWhoami = async (provider?: LLMProviderName) => {
+    setWhoamiLoading(true)
+    setWhoami(null)
+    try {
+      const result = await invoke<{ identity: string | null; provider: string; model: string; latency_ms: number; error?: string }>(
+        IPC.LLM_WHOAMI, { provider }
+      )
+      if (result.error) {
+        addNotification(result.error, 'error')
+      } else {
+        setWhoami({ identity: result.identity!, provider: result.provider, model: result.model, latency_ms: result.latency_ms })
+      }
+    } catch (err: any) {
+      addNotification(err.message || 'Who Am I failed', 'error')
+    } finally {
+      setWhoamiLoading(false)
+    }
   }
 
   if (!activePersona) {
@@ -176,7 +334,9 @@ export function PersonaStudioPanel() {
           {personaDirty && <span className="text-molt-warning text-xs ml-2">(unsaved)</span>}
         </h2>
         <div className="flex gap-2">
-          <button onClick={handlePreview} className="btn-secondary text-sm">Preview</button>
+          <button onClick={handlePreview} className="btn-secondary text-sm" disabled={previewing}>
+            {previewing ? 'Generating...' : 'Preview'}
+          </button>
           <button onClick={handleSave} className="btn-primary text-sm" disabled={!personaDirty}>Save</button>
         </div>
       </div>
@@ -194,9 +354,41 @@ export function PersonaStudioPanel() {
           </div>
         </div>
 
+        {/* LLM Model — saved with persona, used by autopilot */}
+        <div className="panel-card space-y-3">
+          <LLMProviderSelector
+            value={activePersona.llm_provider ?? 'claude'}
+            onChange={(llm_provider) => { updatePersona({ llm_provider }); setWhoami(null) }}
+            label="LLM Model (used by autopilot for this persona)"
+          />
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => handleWhoami(activePersona.llm_provider ?? 'claude')}
+              className="btn-secondary text-xs py-1 px-3"
+              disabled={whoamiLoading}
+            >
+              {whoamiLoading ? 'Asking...' : 'Who Am I?'}
+            </button>
+            <p className="text-[10px] text-molt-muted">
+              Ask the selected model to identify itself
+            </p>
+          </div>
+          {whoami && (
+            <div className="bg-molt-bg rounded-lg p-3 space-y-1">
+              <p className="text-sm text-molt-text">{whoami.identity}</p>
+              <div className="flex gap-3 text-[10px] text-molt-muted">
+                <span>Provider: {LLM_PROVIDERS.find(p => p.id === whoami.provider)?.label ?? whoami.provider}</span>
+                <span>Model: {whoami.model}</span>
+                <span>{whoami.latency_ms}ms</span>
+              </div>
+            </div>
+          )}
+        </div>
+
         <ToneSliders tone={activePersona.tone_settings} onChange={(tone_settings) => updatePersona({ tone_settings })} />
         <InterestTags tags={activePersona.interest_tags} onChange={(interest_tags) => updatePersona({ interest_tags })} />
         <EngagementRulesEditor rules={activePersona.engagement_rules} onChange={(engagement_rules) => updatePersona({ engagement_rules })} />
+        <SubmoltPriorityEditor priorities={activePersona.submolt_priorities} onChange={(submolt_priorities) => updatePersona({ submolt_priorities })} />
 
         <div>
           <h4 className="text-sm font-medium mb-2">System Prompt</h4>
@@ -205,12 +397,54 @@ export function PersonaStudioPanel() {
             rows={6} className="input-field w-full text-sm font-mono resize-none" />
         </div>
 
-        {preview && (
-          <div className="panel-card">
-            <h4 className="text-sm font-medium mb-2">Preview Response</h4>
-            <p className="text-sm text-molt-text whitespace-pre-wrap">{preview}</p>
+        {/* Preview Section */}
+        <div className="panel-card space-y-3">
+          <h4 className="text-sm font-medium">Test Preview</h4>
+          <div className="flex items-end gap-3">
+            <div className="flex-1">
+              <label className="text-xs text-molt-muted mb-1 block">Test with model</label>
+              <div className="flex gap-1">
+                <button
+                  onClick={() => setPreviewProvider(null)}
+                  className={`px-2.5 py-1 text-xs rounded-lg transition-colors ${
+                    previewProvider === null
+                      ? 'bg-molt-accent text-white'
+                      : 'bg-molt-surface text-molt-muted hover:text-molt-text border border-molt-border'
+                  }`}
+                >
+                  Persona Default ({LLM_PROVIDERS.find(p => p.id === (activePersona.llm_provider ?? 'claude'))?.label})
+                </button>
+                {LLM_PROVIDERS.map((p) => (
+                  <button
+                    key={p.id}
+                    onClick={() => setPreviewProvider(p.id)}
+                    className={`px-2.5 py-1 text-xs rounded-lg transition-colors ${
+                      previewProvider === p.id
+                        ? 'bg-molt-accent text-white'
+                        : 'bg-molt-surface text-molt-muted hover:text-molt-text border border-molt-border'
+                    }`}
+                  >
+                    {p.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <button onClick={handlePreview} className="btn-secondary text-xs py-1.5 px-3 shrink-0" disabled={previewing}>
+              {previewing ? 'Running...' : 'Run Preview'}
+            </button>
           </div>
-        )}
+
+          {preview && (
+            <div className="bg-molt-bg rounded-lg p-3 mt-2">
+              {previewUsedProvider && (
+                <div className="text-[10px] text-molt-muted mb-1.5">
+                  Generated with: {LLM_PROVIDERS.find(p => p.id === previewUsedProvider)?.label ?? previewUsedProvider}
+                </div>
+              )}
+              <p className="text-sm text-molt-text whitespace-pre-wrap">{preview}</p>
+            </div>
+          )}
+        </div>
 
         {savedPersonas.length > 1 && (
           <div>
@@ -218,10 +452,13 @@ export function PersonaStudioPanel() {
             <div className="space-y-1">
               {savedPersonas.map((p) => (
                 <button key={p.id} onClick={() => setActivePersona(p)}
-                  className={`w-full text-left px-3 py-2 rounded text-sm ${
+                  className={`w-full text-left px-3 py-2 rounded text-sm flex items-center justify-between ${
                     activePersona.id === p.id ? 'bg-molt-accent/10 text-molt-accent' : 'text-molt-muted hover:bg-molt-surface'
                   }`}>
-                  {p.name}
+                  <span>{p.name}</span>
+                  <span className="text-[10px] opacity-60">
+                    {LLM_PROVIDERS.find(pr => pr.id === p.llm_provider)?.label ?? p.llm_provider ?? 'claude'}
+                  </span>
                 </button>
               ))}
             </div>

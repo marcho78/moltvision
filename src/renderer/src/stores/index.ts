@@ -6,7 +6,7 @@ import type {
   NetworkNode, NetworkEdge, SearchResult, SearchCluster,
   UserPreferences, ApiKeyStatus, MoodData, TrendItem,
   Rivalry, KarmaForecast, PostIdea, SortOrder, FeedSource, OperationMode,
-  LLMProviderName, VoteDirection
+  LLMProviderName, VoteDirection, AgentEngagement, ReplyInboxEntry
 } from '@shared/domain.types'
 
 // --- UI Slice ---
@@ -120,14 +120,36 @@ interface AnalyticsSlice {
 }
 
 // --- Autopilot Slice ---
+interface LiveEvent {
+  type: 'scan' | 'action'
+  timestamp: string
+  phase?: string
+  message?: string
+  action_type?: string
+  submolt?: string
+  post_id?: string
+  content?: string
+  title?: string
+}
+
 interface AutopilotSlice {
   autopilotStatus: AutopilotStatus
   actionQueue: AgentAction[]
   decisionLog: ActivityLogEntry[]
+  activePersonaId: string
+  agentActivity: AgentEngagement[]
+  replyInbox: ReplyInboxEntry[]
+  unreadReplyCount: number
+  liveEvents: LiveEvent[]
   setAutopilotStatus: (status: AutopilotStatus) => void
   setActionQueue: (actions: AgentAction[]) => void
   setDecisionLog: (entries: ActivityLogEntry[]) => void
   removeFromQueue: (actionId: string) => void
+  setActivePersonaId: (id: string) => void
+  setAgentActivity: (entries: AgentEngagement[]) => void
+  setReplyInbox: (entries: ReplyInboxEntry[]) => void
+  setUnreadReplyCount: (count: number) => void
+  addLiveEvent: (event: LiveEvent) => void
 }
 
 // --- Moderation Slice ---
@@ -285,11 +307,23 @@ export const useStore = create<AppState>((set) => ({
   },
   actionQueue: [],
   decisionLog: [],
+  activePersonaId: 'default',
+  agentActivity: [],
+  replyInbox: [],
+  unreadReplyCount: 0,
+  liveEvents: [],
   setAutopilotStatus: (autopilotStatus) => set({ autopilotStatus }),
   setActionQueue: (actionQueue) => set({ actionQueue }),
   setDecisionLog: (decisionLog) => set({ decisionLog }),
   removeFromQueue: (actionId) =>
     set((s) => ({ actionQueue: s.actionQueue.filter((a) => a.id !== actionId) })),
+  setActivePersonaId: (activePersonaId) => set({ activePersonaId }),
+  setAgentActivity: (agentActivity) => set({ agentActivity }),
+  setReplyInbox: (replyInbox) => set({ replyInbox }),
+  setUnreadReplyCount: (unreadReplyCount) => set({ unreadReplyCount }),
+  addLiveEvent: (event) => set((s) => ({
+    liveEvents: [event, ...s.liveEvents].slice(0, 50) // keep last 50 events
+  })),
 
   // --- Moderation ---
   modSelectedSubmolt: null,

@@ -136,6 +136,8 @@ export interface EngagementRules {
   avoid_controversial: boolean
   max_posts_per_hour: number
   max_comments_per_hour: number
+  max_reply_depth: number
+  max_replies_per_thread: number
 }
 
 export interface AgentPersona {
@@ -147,6 +149,7 @@ export interface AgentPersona {
   engagement_rules: EngagementRules
   submolt_priorities: Record<string, number>
   system_prompt: string
+  llm_provider: LLMProviderName
   created_at: string
   updated_at: string
 }
@@ -350,6 +353,7 @@ export interface UserPreferences {
   heartbeat_interval: number
   llm_temperature: number
   max_tokens: number
+  active_persona_id: string
 }
 
 export interface ApiKeyStatus {
@@ -400,4 +404,43 @@ export interface PostIdea {
   content_outline: string
   reasoning: string
   estimated_karma: number
+}
+
+// --- Agent Engagement Tracking ---
+
+export interface AgentEngagement {
+  id: string
+  post_id: string
+  comment_id: string | null
+  action_type: ActionType
+  content_sent: string | null
+  persona_id: string
+  reasoning: string | null
+  created_at: string
+}
+
+export interface ContentPerformance {
+  id: string
+  post_id: string | null
+  comment_id: string | null
+  content_type: 'post' | 'comment'
+  karma_at_creation: number
+  karma_current: number
+  comment_count: number
+  last_checked_at: string
+  created_at: string
+}
+
+export interface ReplyInboxEntry {
+  id: string
+  parent_post_id: string
+  parent_comment_id: string | null
+  agent_original_content: string | null
+  reply_comment_id: string
+  reply_author: string
+  reply_content: string
+  depth: number
+  is_read: boolean
+  agent_responded: boolean
+  discovered_at: string
 }
