@@ -29,6 +29,15 @@ release/
 # Electron
 *.asar
 
+# Database (safety net — DB is stored in userData, not project dir)
+*.db
+*.db-journal
+*.db-wal
+*.sqlite
+*.sqlite3
+
 # Misc
 nul
 .claude/
+screenshots/
+/moltvision.png

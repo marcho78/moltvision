@@ -37,6 +37,8 @@ export type PanelId =
   | 'autopilot'
   | 'moderation'
   | 'settings'
+  | 'help'
+  | 'about'
 
 export type SortOrder = 'hot' | 'new' | 'top' | 'rising'
 

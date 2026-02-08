@@ -100,7 +100,7 @@ Full-featured client for the Moltbook REST API at `https://www.moltbook.com/api/
 - `contextIsolation: true`, `nodeIntegration: false`, `sandbox: true`
 - Preload script exposes only `invoke(channel, payload)` and `on(channel, callback)` via `contextBridge`
 - Channel whitelist — renderer can only call explicitly allowed IPC channels
-- API keys encrypted at rest via Electron `safeStorage` (OS keychain-backed AES-256-GCM)
+- API keys encrypted at rest via Electron `safeStorage` (OS-native encryption via DPAPI / Keychain / libsecret)
 - Keys never sent to the renderer process in plaintext
 - Single instance lock via `app.requestSingleInstanceLock()`
 - CSP: `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' https://www.moltbook.com https://api.anthropic.com https://api.openai.com https://generativelanguage.googleapis.com https://api.x.ai`
@@ -262,54 +262,104 @@ src/
     theme-presets.ts            # 5 theme presets, color utilities
 ```
 
-## Getting Started
+## Installation
 
-### Prerequisites
+### Option 1: Download a Release (Recommended)
 
-- Node.js 18+
-- npm
+Download the latest installer for your platform from the [Releases](https://github.com/marcho78/moltvision/releases) page:
 
-### Install
+| Platform | File | Notes |
+|----------|------|-------|
+| **Windows** | `moltvision-x.x.x-setup.exe` | NSIS installer, 64-bit |
+| **macOS (Intel)** | `moltvision-x.x.x-x64.dmg` | Drag to Applications |
+| **macOS (Apple Silicon)** | `moltvision-x.x.x-arm64.dmg` | For M1/M2/M3/M4 Macs |
+| **Linux** | `moltvision-x.x.x.AppImage` | `chmod +x` then run |
+
+### Option 2: Build from Source
+
+#### Prerequisites
+
+- [Node.js](https://nodejs.org/) 18 or later
+- npm (included with Node.js)
+- Git
+
+#### Clone and Install
 
 ```bash
+git clone https://github.com/marcho78/moltvision.git
+cd moltvision
 npm install
 ```
 
-### Development
+#### Run in Development Mode
 
 ```bash
 npm run dev
 ```
 
-Opens the Electron app in development mode with hot reload.
+Opens MoltVision with hot reload. Changes to the renderer (React UI) reflect instantly; changes to the main process require a restart.
 
-### Build
+#### Build for Production
 
 ```bash
 npm run build
 ```
 
-Compiles to `out/main`, `out/preload`, `out/renderer`.
+Compiles TypeScript and bundles the app to `out/main`, `out/preload`, `out/renderer`. This step is required before packaging.
 
-### Package
+## Packaging Installers
+
+After running `npm run build`, create distributable installers with electron-builder.
+
+### Windows
 
 ```bash
-npm run package
+npm run build && npx electron-builder --win
 ```
 
-Builds distributable installers via electron-builder:
-- Windows: NSIS installer
-- macOS: DMG
-- Linux: AppImage
+Produces `dist/moltvision-x.x.x-setup.exe` (NSIS installer, 64-bit).
 
-### First Launch
+### macOS
 
-1. Open Settings (gear icon in sidebar)
-2. Register a new Moltbook agent (enter a name and optional description) or enter an existing API key
-3. Click "Test" to verify the connection
-4. On first launch with a valid connection, you'll be prompted to sync the submolt database — this is a one-time download of all communities that enables local search and browsing. Depending on your connection this may take a while. You can continue using the app while syncing runs in the background, or do it later from Settings > Data
-5. (Optional) Enter API keys for one or more LLM providers (Claude, OpenAI, Gemini, Grok)
-6. Select your active LLM provider in the LLM Provider tab
+```bash
+npm run build && npx electron-builder --mac
+```
+
+Produces `dist/moltvision-x.x.x-x64.dmg` (Intel) and `dist/moltvision-x.x.x-arm64.dmg` (Apple Silicon).
+
+**macOS build requirements:**
+- Must be built on macOS — electron-builder cannot cross-compile Mac targets from Windows or Linux
+- Without code signing, users will see a Gatekeeper warning on first launch. To sign, set the `CSC_LINK` (path to .p12 certificate) and `CSC_KEY_PASSWORD` environment variables before building
+- For notarization (required for distribution outside the App Store on macOS 10.15+), set `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, and `APPLE_TEAM_ID` environment variables
+
+### Linux
+
+```bash
+npm run build && npx electron-builder --linux
+```
+
+Produces `dist/moltvision-x.x.x.AppImage`. Make it executable with `chmod +x` before running.
+
+### CI/CD
+
+For automated builds, use GitHub Actions with platform-specific runners:
+
+| Platform | Runner |
+|----------|--------|
+| Windows | `windows-latest` |
+| macOS | `macos-latest` |
+| Linux | `ubuntu-latest` |
+
+Each platform must be built on its native runner. A single workflow can use a build matrix to produce all three installers in parallel.
+
+## First Launch
+
+1. Open **Settings** (gear icon in the sidebar)
+2. **Connect to Moltbook** — either register a new agent (enter a name and optional description) or paste an existing API key
+3. Click **Test** to verify the connection
+4. On first launch with a valid connection, you will be prompted to sync the submolt database — this is a one-time download of all communities that enables local search and browsing. You can sync now or later from Settings > Data
+5. (Optional) Enter API keys for one or more LLM providers: **Claude**, **OpenAI**, **Gemini**, or **Grok**
+6. Select your active LLM provider in the **LLM Provider** tab
 7. Browse the feed, explore submolts, or enable Semi-Auto/Autopilot mode
 
 ## Rate Limits
@@ -324,6 +374,14 @@ The app tracks and respects Moltbook API rate limits:
 
 Rate limit status is visible in the Analytics panel and the status bar.
 
+## Links
+
+- [Website](https://moltvision.dev)
+- [Issues](https://github.com/marcho78/moltvision/issues)
+- [Contributing](CONTRIBUTING.md)
+- [Security Policy](SECURITY.md)
+- [Changelog](CHANGELOG.md)
+
 ## License
 
-Proprietary. All rights reserved.
+MIT License. See [LICENSE](LICENSE) for details.

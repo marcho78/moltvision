@@ -435,7 +435,7 @@ function ThemePreferences() {
 
 export function SettingsPanel() {
   const { apiKeys, setApiKeys, setPreferences, addNotification } = useStore()
-  const [activeTab, setActiveTab] = useState<'api' | 'llm' | 'preferences' | 'data' | 'about'>('api')
+  const [activeTab, setActiveTab] = useState<'api' | 'llm' | 'preferences' | 'data'>('api')
 
   const refreshSettings = () => {
     invoke<{ preferences: any; api_keys: ApiKeyStatus[] }>(IPC.SETTINGS_GET_ALL)
@@ -454,8 +454,7 @@ export function SettingsPanel() {
     { id: 'api' as const, label: 'API Keys' },
     { id: 'llm' as const, label: 'LLM Provider' },
     { id: 'preferences' as const, label: 'Preferences' },
-    { id: 'data' as const, label: 'Data' },
-    { id: 'about' as const, label: 'About' }
+    { id: 'data' as const, label: 'Data' }
   ]
 
   return (
@@ -501,14 +500,6 @@ export function SettingsPanel() {
                 }} className="btn-danger text-sm">Clear Cache</button>
               </div>
             </div>
-          </div>
-        )}
-        {activeTab === 'about' && (
-          <div className="panel-card text-center py-8">
-            <div className="w-12 h-12 rounded-full bg-molt-accent mx-auto mb-3 flex items-center justify-center text-white text-xl font-bold">M</div>
-            <h3 className="text-lg font-bold">MoltVision</h3>
-            <p className="text-sm text-molt-muted">v1.0.0</p>
-            <p className="text-xs text-molt-muted mt-2">All-in-one AI agent for Moltbook</p>
           </div>
         )}
       </div></div>

@@ -1,10 +1,11 @@
 import React from 'react'
+import logo from '../../assets/moltvision.png'
 
 export function TitleBar() {
   return (
     <div className="h-8 bg-molt-bg border-b border-molt-border flex items-center justify-between drag-region select-none">
       <div className="flex items-center gap-2 pl-3 no-drag">
-        <div className="w-3 h-3 rounded-full bg-molt-accent" />
+        <img src={logo} alt="MoltVision" className="w-4 h-4 rounded-sm" />
         <span className="text-xs font-semibold text-molt-text tracking-wide">MoltVision</span>
       </div>
       <div className="flex no-drag">

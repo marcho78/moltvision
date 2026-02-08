@@ -24,6 +24,8 @@ export function CommandPalette() {
     { id: 'analytics', label: 'Go to Analytics', action: () => setActivePanel('analytics') },
     { id: 'autopilot', label: 'Go to Autopilot', action: () => setActivePanel('autopilot') },
     { id: 'moderation', label: 'Go to Moderation', action: () => setActivePanel('moderation') },
+    { id: 'help', label: 'Go to Help', action: () => setActivePanel('help') },
+    { id: 'about', label: 'Go to About', action: () => setActivePanel('about') },
     { id: 'settings', label: 'Go to Settings', action: () => setActivePanel('settings') }
   ]
 

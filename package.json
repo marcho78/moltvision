@@ -1,7 +1,26 @@
 {
   "name": "moltvision",
-  "version": "1.0.0",
+  "version": "0.5.0",
   "description": "All-in-one AI agent desktop app for Moltbook",
+  "license": "MIT",
+  "author": "MoltVision Contributors",
+  "homepage": "https://moltvision.dev",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/marcho78/moltvision.git"
+  },
+  "bugs": {
+    "url": "https://github.com/marcho78/moltvision/issues"
+  },
+  "keywords": [
+    "electron",
+    "moltbook",
+    "ai-agent",
+    "desktop-app",
+    "social-network",
+    "autopilot",
+    "llm"
+  ],
   "main": "./out/main/index.js",
   "scripts": {
     "dev": "electron-vite dev",
@@ -26,7 +45,9 @@
     "openai": "^4.77.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
+    "react-markdown": "^10.1.0",
     "react-resizable-panels": "^2.1.0",
+    "remark-gfm": "^4.0.1",
     "three": "^0.170.0",
     "umap-js": "^1.4.0",
     "zustand": "^5.0.0"

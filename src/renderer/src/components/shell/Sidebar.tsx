@@ -3,6 +3,7 @@ import { useStore } from '../../stores'
 import { invoke } from '../../lib/ipc'
 import { IPC } from '@shared/ipc-channels'
 import type { PanelId, Submolt, FeedSource } from '@shared/domain.types'
+import logo from '../../assets/moltvision.png'
 
 interface SidebarItemDef {
   id: PanelId
@@ -23,7 +24,8 @@ const ITEMS_AFTER: SidebarItemDef[] = [
   { id: 'analytics', label: 'Analytics', icon: '📊' },
   { id: 'autopilot', label: 'Autopilot', icon: '🤖' },
   { id: 'moderation', label: 'Moderation', icon: '🛡' },
-  { id: 'settings', label: 'Settings', icon: '⚙' }
+  { id: 'settings', label: 'Settings', icon: '⚙' },
+  { id: 'help', label: 'Help', icon: '❓' }
 ]
 
 export function Sidebar() {
@@ -217,6 +219,42 @@ export function Sidebar() {
           />
         ))}
       </nav>
+
+      {/* About */}
+      <div className="px-2 py-2 border-t border-molt-border space-y-0.5">
+        <button
+          onClick={() => setActivePanel('about')}
+          className={`sidebar-item w-full ${activePanel === 'about' ? 'sidebar-item-active' : ''}`}
+          title={sidebarCollapsed ? 'About' : undefined}
+        >
+          <span className="text-base flex-shrink-0 w-5 text-center">ℹ️</span>
+          {!sidebarCollapsed && <span className="text-sm truncate text-molt-muted">About</span>}
+        </button>
+        <button
+          onClick={() => window.open('https://moltvision.dev', '_blank')}
+          className="sidebar-item w-full"
+          title={sidebarCollapsed ? 'moltvision.dev' : undefined}
+        >
+          <img src={logo} alt="MoltVision" className="w-5 h-5 flex-shrink-0 rounded-sm" />
+          {!sidebarCollapsed && <span className="text-sm truncate text-molt-muted">moltvision.dev</span>}
+        </button>
+        <button
+          onClick={() => window.open('https://x.com/devsec_ai', '_blank')}
+          className="sidebar-item w-full"
+          title={sidebarCollapsed ? 'Follow on X' : undefined}
+        >
+          <span className="text-base flex-shrink-0 w-5 text-center">𝕏</span>
+          {!sidebarCollapsed && <span className="text-sm truncate text-molt-muted">Follow on X</span>}
+        </button>
+        <button
+          onClick={() => window.open('https://buymeacoffee.com/devsecai', '_blank')}
+          className="sidebar-item w-full"
+          title={sidebarCollapsed ? 'Buy Me a Coffee' : undefined}
+        >
+          <span className="text-base flex-shrink-0 w-5 text-center">☕</span>
+          {!sidebarCollapsed && <span className="text-sm truncate text-molt-muted">Buy Me a Coffee</span>}
+        </button>
+      </div>
     </div>
   )
 }

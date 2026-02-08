@@ -1,5 +1,77 @@
 # Changelog
 
+## 0.6.0 — 2026-02-07
+
+In-app help system, standalone About panel, open-source readiness, and documentation.
+
+### Help Panel (New)
+- In-app documentation viewer with sidebar table of contents and styled markdown content
+- 8 documentation sections covering all app features (Getting Started, Feed, Security & Keys, Persona Studio, Autopilot, Exploration Panels, Conversations & Moderation, Analytics Settings & LLM)
+- Markdown rendered via `react-markdown` with `remark-gfm` (tables, task lists, strikethrough)
+- Custom component overrides styled with `molt-*` design tokens (headings, tables, code blocks, blockquotes, lists, links, horizontal rules)
+- Scroll resets to top on section change
+- `@docs` Vite alias and `*.md?raw` type declaration for raw markdown imports
+- Documentation files stored at `docs/` project root
+
+### About Panel (New)
+- Standalone About panel (previously a tab inside Settings)
+- App logo, version with Beta badge, project description
+- Links to moltvision.dev, Follow on X, Buy Me a Coffee
+- MIT License footer
+- Accessible from sidebar bottom section and command palette
+
+### Sidebar
+- Added Help entry (between Settings and About)
+- Bottom section with border separator containing About (navigates to About panel with active highlight), moltvision.dev (logo icon), Follow on X, Buy Me a Coffee
+- About button highlights when About panel is active
+
+### Title Bar
+- App logo replaces accent dot next to "MoltVision" text
+
+### Open-Source Readiness
+- MIT License file
+- CONTRIBUTING.md with development setup, code style, PR guidelines
+- SECURITY.md with vulnerability reporting instructions
+- `.prettierrc` and `.editorconfig` for consistent formatting
+- GitHub issue templates (bug report, feature request) and PR template
+- `.github/FUNDING.yml` (Buy Me a Coffee)
+- `package.json`: added license, author, homepage, repository, bugs, keywords fields
+- `electron-builder.yml`: cross-platform config (x64+arm64 macOS, NSIS Windows, AppImage Linux), macOS entitlements, artifact naming
+- `build/entitlements.mac.plist` for macOS code signing
+
+### Documentation Fixes
+- Fixed unverified "Secure Enclave" claim in security docs — rewritten with exact Electron safeStorage documentation quotes
+- Fixed unverified "AES-256-GCM" claim in README and CHANGELOG — replaced with "OS-native encryption via DPAPI / Keychain / libsecret"
+- Fixed missing "rising" sort option in Getting Started docs
+- Fixed incorrect split token display description — corrected to combined total
+- Fixed Ctrl+K shortcut noted as configurable — corrected to hardcoded
+
+### README
+- Full installation section: download release, build from source, per-platform packaging commands
+- CI/CD runner matrix for GitHub Actions
+- First Launch guide
+- Links section (website, issues, contributing, security, changelog)
+
+### Database Safety
+- Added `*.db`, `*.db-journal`, `*.db-wal`, `*.sqlite`, `*.sqlite3` to `.gitignore`
+
+### Domain Types
+- Added `'help'` and `'about'` to `PanelId` union type
+
+### New Files
+- `src/renderer/src/components/panels/HelpPanel.tsx`
+- `src/renderer/src/components/panels/AboutPanel.tsx`
+- `src/renderer/src/raw-imports.d.ts`
+- `docs/*.md` (9 documentation files)
+- `LICENSE`, `CONTRIBUTING.md`, `SECURITY.md`
+- `.prettierrc`, `.editorconfig`
+- `.github/FUNDING.yml`, `.github/ISSUE_TEMPLATE/bug_report.md`, `.github/ISSUE_TEMPLATE/feature_request.md`, `.github/PULL_REQUEST_TEMPLATE.md`
+- `build/entitlements.mac.plist`
+
+### Dependencies
+- Added `react-markdown` ^9.0.3
+- Added `remark-gfm` ^4.0.0
+
 ## 0.5.0 — 2026-02-07
 
 Save posts feature, sidebar improvements, and Agent Network panel hardening.
@@ -440,7 +512,7 @@ Initial release.
 - SQLite database with 14 tables (configuration, cache, analytics, operational)
 - FTS5 virtual table for full-text search with automatic sync triggers
 - Secure IPC architecture: ~45 namespaced channels with preload whitelist
-- API key encryption via Electron safeStorage (OS keychain-backed AES-256-GCM)
+- API key encryption via Electron safeStorage (OS-native encryption via DPAPI / Keychain / libsecret)
 - Context isolation, sandbox mode, CSP headers
 
 ### Moltbook API Integration
