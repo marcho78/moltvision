@@ -38,6 +38,7 @@ interface FeedSlice {
   hasMore: boolean
   loading: boolean
   feedView: FeedView
+  savedPostIds: Set<string>
   setPosts: (posts: Post[], nextOffset?: number | null, hasMore?: boolean) => void
   appendPosts: (posts: Post[], nextOffset: number | null, hasMore: boolean) => void
   setSortOrder: (sort: SortOrder) => void
@@ -46,6 +47,8 @@ interface FeedSlice {
   setFeedLoading: (loading: boolean) => void
   setFeedView: (view: FeedView) => void
   updatePostVote: (postId: string, direction: VoteDirection, newKarma: number) => void
+  setSavedPostIds: (ids: string[]) => void
+  toggleSavedPost: (postId: string, saved: boolean) => void
 }
 
 // --- Agents Slice ---
@@ -219,6 +222,7 @@ export const useStore = create<AppState>((set) => ({
   hasMore: false,
   loading: false,
   feedView: 'card',
+  savedPostIds: new Set<string>(),
   setPosts: (posts, nextOffset, hasMore) => set({ posts, nextOffset: nextOffset ?? null, hasMore: hasMore ?? false }),
   appendPosts: (posts, nextOffset, hasMore) => set((s) => {
     // Deduplicate by post id
@@ -239,6 +243,14 @@ export const useStore = create<AppState>((set) => ({
     set((s) => ({
       posts: s.posts.map((p) => (p.id === postId ? { ...p, our_vote: direction, karma: newKarma } : p))
     })),
+  setSavedPostIds: (ids) => set({ savedPostIds: new Set(ids) }),
+  toggleSavedPost: (postId, saved) =>
+    set((s) => {
+      const next = new Set(s.savedPostIds)
+      if (saved) next.add(postId)
+      else next.delete(postId)
+      return { savedPostIds: next }
+    }),
 
   // --- Agents ---
   agents: [],

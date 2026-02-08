@@ -17,7 +17,19 @@ export function useLiveFeed(interval = 15000) {
     try {
       let result: FeedListResponse
 
-      if (feedSource === 'subscribed') {
+      if (feedSource === 'saved') {
+        // Local-only: read saved posts from SQLite
+        const raw = await invoke<any>(IPC.FEED_GET_SAVED, {
+          limit: 50,
+          offset: offset ?? 0
+        })
+        const posts = raw?.posts ?? []
+        result = {
+          posts: Array.isArray(posts) ? posts : [],
+          next_offset: null,
+          has_more: false
+        }
+      } else if (feedSource === 'subscribed') {
         // GET /feed — personalized (subscriptions + follows)
         const raw = await invoke<any>(IPC.FEED_PERSONALIZED, {
           sort: sortOrder,

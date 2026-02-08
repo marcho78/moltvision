@@ -1,5 +1,43 @@
 # Changelog
 
+## 0.5.0 — 2026-02-07
+
+Save posts feature, sidebar improvements, and Agent Network panel hardening.
+
+### Save Posts
+- `saved_posts` SQLite table (persistent — survives cache clears, like `user_subscriptions`)
+- `saved-posts.queries.ts` — `savePost()`, `unsavePost()`, `getSavedPostIds()`, `getSavedPosts()` (JOIN on `cached_posts`)
+- 3 new IPC channels: `feed:save-post`, `feed:unsave-post`, `feed:get-saved`
+- IPC handlers: DB-first save/unsave, get-saved returns normalized Post objects + all saved IDs
+- Preload whitelist updated for all 3 channels
+- `FeedSource` type extended with `'saved'`
+- Zustand FeedSlice: `savedPostIds: Set<string>`, `setSavedPostIds()`, `toggleSavedPost()` for fast in-memory lookup
+- `useLiveFeed` hook: `saved` feed source reads from local SQLite (no API call)
+- Bookmark icon SVG component (`IconBookmark`) with filled/outline states
+- `SaveButton` component with optimistic UI — updates store immediately, reverts on IPC failure, shows toast notifications
+- Save button visible on every post in both compact and card views (next to comment button)
+- "Saved" tab in feed source pills (All / Subscribed / Saved / m/submolt)
+- Saved post IDs loaded on `LiveFeedPanel` mount via `useEffect` so bookmark state is visible immediately across all views
+- "Saved Posts" entry in sidebar (between Subscriptions and Conversations) with bookmark emoji icon
+- Sidebar active state: "Saved Posts" highlights when on feed panel with saved source; "Feed" item deactivates and resets to "all" on click
+
+### Sidebar
+- Removed subscription color dots from collapsed sidebar — collapsed mode now shows only nav icons, no submolt dots underneath the pin icon
+
+### AgentNetworkPanel (Hardened)
+- `safeStr()` defensive string coercion for all rendered fields — prevents React crash on raw API objects
+- `DisplayAgent` and `AgentProfileData` typed interfaces replace untyped `any` throughout
+- `mapToDisplayAgent()` normalizer applied to all API response nodes
+- `NetworkStats` component: 4-stat summary bar (Agents, Following, Avg Karma, Connections)
+- `AgentCard` redesigned: gradient avatar, karma badge, post count, submolt tags (max 3 + overflow), following badge
+- `AgentDetailSidebar` redesigned: banner gradient, loading/error states, stats grid (Karma, Followers, Following, Posts), bio section, karma breakdown bar (post vs comment), active submolts list, joined date
+- Follow/unfollow updates both the store's selected agent and the network node list
+- Error handling with typed catch blocks (`err instanceof Error`)
+- `useCallback` on `reload` and `handleSelect` to prevent unnecessary re-renders
+
+### New File
+- `src/main/db/queries/saved-posts.queries.ts`
+
 ## 0.4.0 — 2026-02-07
 
 Theme customization, token usage analytics, advanced persona strategies, panel redesigns, and bonus features removal.

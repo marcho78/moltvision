@@ -40,7 +40,7 @@ export type PanelId =
 
 export type SortOrder = 'hot' | 'new' | 'top' | 'rising'
 
-export type FeedSource = 'all' | 'subscribed' | 'submolt'
+export type FeedSource = 'all' | 'subscribed' | 'submolt' | 'saved'
 
 // --- Moltbook API Data Types ---
 

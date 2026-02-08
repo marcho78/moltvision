@@ -3,7 +3,7 @@ import type { MoltApi } from './types'
 
 const ALLOWED_CHANNELS = new Set([
   'feed:list', 'feed:personalized', 'feed:get-post', 'feed:create-post', 'feed:delete-post',
-  'feed:upvote', 'feed:downvote',
+  'feed:upvote', 'feed:downvote', 'feed:save-post', 'feed:unsave-post', 'feed:get-saved',
   'comments:get-tree', 'comments:create', 'comments:upvote',
   'agents:list', 'agents:get-profile', 'agents:get-my-profile', 'agents:get-network',
   'agents:follow', 'agents:unfollow', 'agents:register', 'agents:update-profile',

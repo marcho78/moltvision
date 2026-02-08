@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react'
 import { useStore } from '../../stores'
 import { invoke } from '../../lib/ipc'
 import { IPC } from '@shared/ipc-channels'
-import type { PanelId, Submolt } from '@shared/domain.types'
+import type { PanelId, Submolt, FeedSource } from '@shared/domain.types'
 
 interface SidebarItemDef {
   id: PanelId
@@ -34,6 +34,8 @@ export function Sidebar() {
   const submolts = useStore((s) => s.submolts)
   const setSubmolts = useStore((s) => s.setSubmolts)
   const setSelectedSubmolt = useStore((s) => s.setSelectedSubmolt)
+  const setFeedSource = useStore((s) => s.setFeedSource)
+  const feedSource = useStore((s) => s.feedSource)
   const addNotification = useStore((s) => s.addNotification)
 
   const [subsOpen, setSubsOpen] = useState(true)
@@ -72,6 +74,11 @@ export function Sidebar() {
 
   const handleSubmoltClick = (name: string) => {
     setSelectedSubmolt(name)
+    setActivePanel('feed')
+  }
+
+  const handleSavedClick = () => {
+    setFeedSource('saved')
     setActivePanel('feed')
   }
 
@@ -123,9 +130,12 @@ export function Sidebar() {
           <SidebarItem
             key={item.id}
             item={item}
-            active={activePanel === item.id}
+            active={activePanel === item.id && !(item.id === 'feed' && feedSource === 'saved')}
             collapsed={sidebarCollapsed}
-            onClick={() => setActivePanel(item.id)}
+            onClick={() => {
+              if (item.id === 'feed' && feedSource === 'saved') setFeedSource('all')
+              setActivePanel(item.id)
+            }}
           />
         ))}
 
@@ -184,21 +194,17 @@ export function Sidebar() {
             </div>
           )}
 
-          {/* Collapsed: show color dots */}
-          {subsOpen && sidebarCollapsed && subscribed.length > 0 && (
-            <div className="flex flex-col items-center gap-1 mt-1">
-              {subscribed.map((sub) => (
-                <button
-                  key={sub.id}
-                  onClick={() => handleSubmoltClick(sub.name)}
-                  className="w-3 h-3 rounded-full hover:ring-2 ring-molt-accent transition-all"
-                  style={{ backgroundColor: sub.theme_color || '#7c5cfc' }}
-                  title={`m/${sub.name}`}
-                />
-              ))}
-            </div>
-          )}
         </div>
+
+        {/* Saved Posts */}
+        <button
+          onClick={handleSavedClick}
+          className={`sidebar-item w-full ${activePanel === 'feed' && feedSource === 'saved' ? 'sidebar-item-active' : ''}`}
+          title={sidebarCollapsed ? 'Saved Posts' : undefined}
+        >
+          <span className="text-base flex-shrink-0">🔖</span>
+          {!sidebarCollapsed && <span className="text-sm truncate">Saved Posts</span>}
+        </button>
 
         {/* Rest of menu items */}
         {ITEMS_AFTER.map((item) => (

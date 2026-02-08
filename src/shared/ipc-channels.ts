@@ -7,6 +7,9 @@ export const IPC = {
   FEED_DELETE_POST: 'feed:delete-post',
   FEED_UPVOTE: 'feed:upvote',
   FEED_DOWNVOTE: 'feed:downvote',
+  FEED_SAVE_POST: 'feed:save-post',
+  FEED_UNSAVE_POST: 'feed:unsave-post',
+  FEED_GET_SAVED: 'feed:get-saved',
 
   // Comments
   COMMENTS_GET_TREE: 'comments:get-tree',

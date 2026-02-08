@@ -33,6 +33,14 @@ function IconComment() {
   )
 }
 
+function IconBookmark({ filled }: { filled: boolean }) {
+  return (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill={filled ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M3 2.5A1.5 1.5 0 014.5 1h7A1.5 1.5 0 0113 2.5v12L8 11l-5 3.5V2.5z" />
+    </svg>
+  )
+}
+
 function IconListView() {
   return (
     <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
@@ -99,6 +107,49 @@ function VoteColumn({ post, vertical = true }: { post: Post; vertical?: boolean 
   )
 }
 
+// ─── Save Button ─────────────────────────────────────────
+
+function SaveButton({ post }: { post: Post }) {
+  const savedPostIds = useStore((s) => s.savedPostIds)
+  const toggleSavedPost = useStore((s) => s.toggleSavedPost)
+  const addNotification = useStore((s) => s.addNotification)
+  const isSaved = savedPostIds.has(post.id)
+
+  const handleSave = async (e: React.MouseEvent) => {
+    e.stopPropagation()
+    const newSaved = !isSaved
+    // Optimistic UI update
+    toggleSavedPost(post.id, newSaved)
+    try {
+      if (newSaved) {
+        await invoke(IPC.FEED_SAVE_POST, { post_id: post.id })
+        addNotification('Post saved', 'success')
+      } else {
+        await invoke(IPC.FEED_UNSAVE_POST, { post_id: post.id })
+        addNotification('Post unsaved', 'info')
+      }
+    } catch {
+      // Revert on failure
+      toggleSavedPost(post.id, isSaved)
+      addNotification('Failed to save post', 'error')
+    }
+  }
+
+  return (
+    <button onClick={handleSave}
+      className={`flex items-center gap-1 px-2 py-1 rounded-md text-xs transition-colors ${
+        isSaved
+          ? 'text-molt-accent hover:bg-molt-accent/10'
+          : 'text-molt-muted hover:bg-molt-bg hover:text-molt-text'
+      }`}
+      title={isSaved ? 'Unsave' : 'Save'}
+    >
+      <IconBookmark filled={isSaved} />
+      <span>{isSaved ? 'Saved' : 'Save'}</span>
+    </button>
+  )
+}
+
 // ─── Avatar ─────────────────────────────────────────────
 
 function AgentAvatar({ name, size = 'md' }: { name: string; size?: 'sm' | 'md' }) {
@@ -145,6 +196,7 @@ function CompactPostRow({ post, onClick }: { post: Post; onClick: () => void }) 
           <span>by {post.author?.username}</span>
           <span>{timeAgo}</span>
           <span className="flex items-center gap-1"><IconComment /> {post.comment_count}</span>
+          <SaveButton post={post} />
         </div>
       </div>
     </div>
@@ -215,6 +267,7 @@ function CardPost({ post, onClick }: { post: Post; onClick: () => void }) {
           <IconComment />
           <span>{post.comment_count} {post.comment_count === 1 ? 'comment' : 'comments'}</span>
         </button>
+        <SaveButton post={post} />
       </div>
     </div>
   )
@@ -338,7 +391,7 @@ function SubmoltBrowser({ onSelect, onClose }: { onSelect: (name: string) => voi
 function FeedSourceTabs() {
   const { feedSource, setFeedSource, selectedSubmolt, setSelectedSubmolt } = useStore()
 
-  const handleTab = (source: 'all' | 'subscribed' | 'submolt') => {
+  const handleTab = (source: 'all' | 'subscribed' | 'submolt' | 'saved') => {
     if (source !== 'submolt') setSelectedSubmolt(null)
     setFeedSource(source)
   }
@@ -357,6 +410,12 @@ function FeedSourceTabs() {
           feedSource === 'subscribed' ? 'bg-molt-surface text-molt-text font-medium shadow-sm' : 'text-molt-muted hover:text-molt-text'
         }`}
       >Subscribed</button>
+      <button
+        onClick={() => handleTab('saved')}
+        className={`px-2.5 py-1 text-xs rounded-md transition-all ${
+          feedSource === 'saved' ? 'bg-molt-surface text-molt-text font-medium shadow-sm' : 'text-molt-muted hover:text-molt-text'
+        }`}
+      >Saved</button>
       {selectedSubmolt && (
         <button
           onClick={() => handleTab('submolt')}
@@ -500,11 +559,18 @@ function EmptyFeed() {
 // ─── Main Panel ─────────────────────────────────────────
 
 export function LiveFeedPanel() {
-  const { posts, loading, feedView, selectedSubmolt, setSelectedSubmolt, setActivePanel, setActivePost, setActivePostData, submolts, setSubmolts, addNotification, hasMore, setFeedSource } = useStore()
+  const { posts, loading, feedView, selectedSubmolt, setSelectedSubmolt, setActivePanel, setActivePost, setActivePostData, submolts, setSubmolts, addNotification, hasMore, setFeedSource, setSavedPostIds } = useStore()
   const { refresh, loadMore } = useLiveFeed()
   const [composing, setComposing] = useState(false)
   const [subLoading, setSubLoading] = useState(false)
   const [showSubmoltBrowser, setShowSubmoltBrowser] = useState(false)
+
+  // Load saved post IDs on mount so bookmark state is visible immediately
+  useEffect(() => {
+    invoke<{ posts: any[]; savedIds: string[] }>(IPC.FEED_GET_SAVED, {}).then((resp) => {
+      if (resp?.savedIds) setSavedPostIds(resp.savedIds)
+    }).catch(() => {})
+  }, [setSavedPostIds])
 
   const handleSubmoltSelect = (name: string) => {
     setSelectedSubmolt(name)

@@ -175,6 +175,12 @@ CREATE TABLE IF NOT EXISTS user_subscriptions (
   subscribed_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- Saved Posts (persistent — user bookmarks, never cleared by cache cleanup)
+CREATE TABLE IF NOT EXISTS saved_posts (
+  post_id TEXT PRIMARY KEY,
+  saved_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 -- Operational Tables
 CREATE TABLE IF NOT EXISTS rate_limits (
   resource TEXT PRIMARY KEY,

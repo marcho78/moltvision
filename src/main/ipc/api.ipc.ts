@@ -2,6 +2,7 @@ import { ipcMain, BrowserWindow } from 'electron'
 import { IPC } from '../../shared/ipc-channels'
 import { moltbookClient } from '../services/moltbook-api.service'
 import { upsertPosts, upsertComments, upsertAgent, upsertSubmolt, getCachedPosts, getCachedPost, getCommentsByPost, getCachedAgents, getCachedSubmolts, searchPostsFTS, clearAllCaches, getAgentsFromPosts, getAgentSubmoltEdges, updateSubmoltSubscription, getSubscribedSubmoltNames, expireOldPosts, expireOldCaches, searchCachedSubmolts, getCachedSubmoltCount } from '../db/queries/cache.queries'
+import { savePost, unsavePost, getSavedPosts, getSavedPostIds } from '../db/queries/saved-posts.queries'
 import log from 'electron-log'
 
 // --- Submolt Cache Sync ---
@@ -253,6 +254,49 @@ export function registerApiHandlers(mainWindow?: BrowserWindow | null): void {
 
   ipcMain.handle(IPC.FEED_DOWNVOTE, async (_e, payload) => {
     return await moltbookClient.downvotePost(payload.post_id)
+  })
+
+  // --- Saved Posts ---
+  ipcMain.handle(IPC.FEED_SAVE_POST, async (_e, payload) => {
+    try {
+      savePost(payload.post_id)
+      return { success: true }
+    } catch (err: any) {
+      log.error('Save post error:', err.message)
+      throw err
+    }
+  })
+
+  ipcMain.handle(IPC.FEED_UNSAVE_POST, async (_e, payload) => {
+    try {
+      unsavePost(payload.post_id)
+      return { success: true }
+    } catch (err: any) {
+      log.error('Unsave post error:', err.message)
+      throw err
+    }
+  })
+
+  ipcMain.handle(IPC.FEED_GET_SAVED, async (_e, payload) => {
+    try {
+      const limit = payload?.limit ?? 50
+      const offset = payload?.offset ?? 0
+      const posts = getSavedPosts(limit, offset)
+      const savedIds = getSavedPostIds()
+      // Normalize flat rows into Post-shaped objects
+      const normalized = posts.map((p: any) => ({
+        id: p.id, title: p.title, content: p.content,
+        author: { id: p.author_id, username: p.author_username },
+        submolt: { id: p.submolt_id, name: p.submolt_name, theme_color: p.submolt_theme_color },
+        karma: p.karma, comment_count: p.comment_count,
+        our_vote: p.our_vote ?? 'none', is_own: !!p.is_own,
+        created_at: p.created_at, updated_at: p.updated_at
+      }))
+      return { posts: normalized, savedIds }
+    } catch (err: any) {
+      log.error('Get saved posts error:', err.message)
+      return { posts: [], savedIds: [] }
+    }
   })
 
   // --- Comments ---
