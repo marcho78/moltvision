@@ -1,7 +1,7 @@
 import { ipcMain, BrowserWindow } from 'electron'
 import { IPC } from '../../shared/ipc-channels'
 import { autopilotService } from '../services/autopilot.service'
-import { getQueuedActions } from '../db/queries/queue.queries'
+import { getQueuedActions, rejectAllPending, clearCompletedActions } from '../db/queries/queue.queries'
 import { getActivityLog } from '../db/queries/analytics.queries'
 import { getEngagementHistory, getAllReplies, getUnreadReplyCount, markRepliesRead } from '../db/queries/engagement.queries'
 import log from 'electron-log'
@@ -42,6 +42,13 @@ export function registerAutopilotHandlers(mainWindow: BrowserWindow): void {
       type: 'scan',
       timestamp: new Date().toISOString(),
       ...data
+    })
+  })
+
+  autopilotService.on('queue:updated', () => {
+    mainWindow.webContents.send(IPC.AUTOPILOT_LIVE_EVENT, {
+      type: 'queue_updated',
+      timestamp: new Date().toISOString()
     })
   })
 
@@ -109,5 +116,15 @@ export function registerAutopilotHandlers(mainWindow: BrowserWindow): void {
   ipcMain.handle(IPC.AUTOPILOT_MARK_REPLIES_READ, async (_e, payload) => {
     markRepliesRead(payload.ids)
     return { success: true }
+  })
+
+  ipcMain.handle(IPC.AUTOPILOT_REJECT_ALL, async () => {
+    const count = rejectAllPending()
+    return { success: true, rejected: count }
+  })
+
+  ipcMain.handle(IPC.AUTOPILOT_CLEAR_QUEUE, async () => {
+    const count = clearCompletedActions()
+    return { success: true, cleared: count }
   })
 }

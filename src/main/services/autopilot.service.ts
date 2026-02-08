@@ -1,7 +1,7 @@
 import { EventEmitter } from 'events'
 import log from 'electron-log'
 import type { OperationMode, ActionPayload, AutopilotStatus, AgentPersona, EngagementRules } from '../../shared/domain.types'
-import { llmManager } from './llm.service'
+import { llmManager, cleanJsonResponse } from './llm.service'
 import { moltbookClient } from './moltbook-api.service'
 import { enqueueAction, getNextApproved, updateActionStatus, rejectAllPending, countActionsInPeriod, countActionsTodayTotal } from '../db/queries/queue.queries'
 import { logActivity } from '../db/queries/analytics.queries'
@@ -29,7 +29,8 @@ export class AutopilotService extends EventEmitter {
 
   // Schedule defaults — overridden by persona engagement_rules each cycle
   private scanInterval = 60000
-  private cooldownMs = 5000
+  // API rate limit: 1 comment per 20 seconds — use 21s to be safe
+  private cooldownMs = 21000
 
   getStatus(): AutopilotStatus {
     return {
@@ -38,6 +39,9 @@ export class AutopilotService extends EventEmitter {
       last_scan_at: this.lastScanAt,
       actions_this_hour: countActionsInPeriod(1),
       actions_today: countActionsTodayTotal(),
+      comments_this_hour: countEngagementsInPeriod(1, 'create_comment') + countEngagementsInPeriod(1, 'reply'),
+      comments_today: countEngagementsInPeriod(24, 'create_comment') + countEngagementsInPeriod(24, 'reply'),
+      posts_today: countEngagementsInPeriod(24, 'create_post'),
       next_scan_at: this.scanTimer ? new Date(Date.now() + this.scanInterval).toISOString() : null,
       emergency_stopped: this.emergencyStopped
     }
@@ -156,9 +160,17 @@ export class AutopilotService extends EventEmitter {
     if (this.emergencyStopped) return
 
     const persona = this.loadPersona()
-    const rules = persona.engagement_rules as EngagementRules & { max_reply_depth?: number; max_replies_per_thread?: number }
+    const rawRules = persona.engagement_rules as EngagementRules & { max_reply_depth?: number; max_replies_per_thread?: number }
 
-    // Check limits from persona
+    // Clamp persona limits to Moltbook API maximums
+    // API: 1 post per 30 min = max 2/hour, 50 comments/day, 1 comment per 20 sec
+    const rules = {
+      ...rawRules,
+      max_posts_per_hour: Math.min(rawRules.max_posts_per_hour, 2),
+      max_comments_per_hour: Math.min(rawRules.max_comments_per_hour, 10)
+    }
+
+    // Check limits from persona (clamped to API maximums)
     const postsThisHour = countEngagementsInPeriod(1, 'create_post')
     const commentsThisHour = countEngagementsInPeriod(1, 'create_comment') + countEngagementsInPeriod(1, 'reply')
 
@@ -262,19 +274,45 @@ export class AutopilotService extends EventEmitter {
       this.emit('scan:progress', { phase: 'evaluate', message: `Found ${allPosts.length} posts, ${eligiblePosts.length} eligible — evaluating...` })
 
       // --- Evaluate and act on eligible posts ---
-      for (const post of eligiblePosts) {
+      for (let i = 0; i < eligiblePosts.length; i++) {
+        const post = eligiblePosts[i]
         if (this.emergencyStopped) break
 
-        // Recheck limits each iteration
+        // Recheck limits each iteration — persona hourly limits + API hard limits
         const currentPosts = countEngagementsInPeriod(1, 'create_post')
         const currentComments = countEngagementsInPeriod(1, 'create_comment') + countEngagementsInPeriod(1, 'reply')
         if (currentPosts >= rules.max_posts_per_hour && currentComments >= rules.max_comments_per_hour) break
+        // API hard limit: 50 comments per day
+        const commentsToday = countEngagementsInPeriod(24, 'create_comment') + countEngagementsInPeriod(24, 'reply')
+        if (commentsToday >= 50) {
+          log.info('Daily comment limit reached (50/day API limit) — stopping comment actions')
+          this.emit('scan:progress', { phase: 'error', message: 'Daily comment limit reached (50/day)' })
+          break
+        }
+
+        const postSubmolt = post.submolt?.name ?? post.submolt_name ?? '?'
+        const postTitle = (post.title ?? '').slice(0, 60)
+        this.emit('scan:progress', {
+          phase: 'evaluating',
+          message: `[${i + 1}/${eligiblePosts.length}] Evaluating: "${postTitle}" in m/${postSubmolt}`
+        })
 
         const evaluation = await this.evaluatePost(post, persona)
-        if (!evaluation || evaluation.verdict === 'skip') continue
+        if (!evaluation || evaluation.verdict === 'skip') {
+          this.emit('scan:progress', {
+            phase: 'evaluated',
+            message: `Skipped: "${postTitle}" — ${evaluation?.reasoning ?? 'no evaluation returned'}`
+          })
+          continue
+        }
 
         // Skip if already engaged with this specific action type
         if (hasEngaged(post.id, evaluation.action)) continue
+
+        this.emit('scan:progress', {
+          phase: 'planning',
+          message: `Engaging: "${postTitle}" — ${evaluation.action} (${evaluation.reasoning.slice(0, 80)})`
+        })
 
         const action = await this.planAction(post, evaluation, persona)
         if (!action) continue
@@ -287,14 +325,34 @@ export class AutopilotService extends EventEmitter {
           })
           updateActionStatus(actionId, 'approved')
           await this.executeAction(actionId, action, persona.id, evaluation.reasoning)
+          this.emit('scan:progress', {
+            phase: 'executed',
+            message: `Executed ${action.type}: "${postTitle}" in m/${postSubmolt}${action.content ? ' — "' + action.content.slice(0, 60) + '"' : ''}`
+          })
           await this.delay(this.cooldownMs)
         } else {
-          // Semi-auto: queue for approval
+          // Semi-auto: queue for approval with original post context
           enqueueAction({
             payload: action,
             reasoning: evaluation.reasoning,
-            priority: evaluation.priority
+            priority: evaluation.priority,
+            context: JSON.stringify({
+              original_post: {
+                id: post.id,
+                title: post.title,
+                content: (post.content ?? '').slice(0, 500),
+                submolt: postSubmolt,
+                author: post.author?.name ?? post.author_name ?? 'unknown',
+                karma: post.karma ?? 0
+              }
+            })
           })
+          this.emit('scan:progress', {
+            phase: 'queued',
+            message: `Queued ${action.type} for approval: "${postTitle}" in m/${postSubmolt}${action.content ? ' — "' + action.content.slice(0, 60) + '"' : ''}`
+          })
+          // Notify UI that queue has updated
+          this.emit('queue:updated')
         }
       }
 
@@ -343,7 +401,7 @@ export class AutopilotService extends EventEmitter {
         json_mode: true,
         provider: persona.llm_provider
       })
-      return JSON.parse(response.content) as Evaluation
+      return JSON.parse(cleanJsonResponse(response.content)) as Evaluation
     } catch (err) {
       log.error('Post evaluation error:', err)
       return null
@@ -377,7 +435,7 @@ export class AutopilotService extends EventEmitter {
         json_mode: true,
         provider: persona.llm_provider
       })
-      return JSON.parse(response.content)
+      return JSON.parse(cleanJsonResponse(response.content))
     } catch (err) {
       log.error('Reply evaluation error:', err)
       return { should_reply: false, reasoning: 'evaluation error' }
@@ -398,13 +456,12 @@ export class AutopilotService extends EventEmitter {
 
     try {
       const isComment = evaluation.action === 'comment'
-      const charLimit = isComment ? 125 : 2000
 
       const response = await llmManager.chat({
         messages: [
           {
             role: 'system',
-            content: `${persona.system_prompt}\n\nYou are writing a ${isComment ? 'comment' : 'post'} on Moltbook in the style: ${persona.tone_settings.style}. Be authentic to your persona.${isComment ? `\n\nCRITICAL: Your comment must be ${charLimit} characters or fewer. This is a hard API limit. Be concise but insightful.` : ''}\n\nRespond with JSON only: {"content":"your text here"}`
+            content: `${persona.system_prompt}\n\nYou are writing a ${isComment ? 'comment' : 'post'} on Moltbook (an AI social network) in the style: ${persona.tone_settings.style}. Be authentic to your persona.${isComment ? '\n\nWrite a short, punchy comment — 1-2 complete sentences. Every sentence must be finished. Never leave a thought incomplete or cut off.' : ''}\n\nRespond with JSON only: {"content":"your text here"}`
           },
           {
             role: 'user',
@@ -417,13 +474,8 @@ export class AutopilotService extends EventEmitter {
         provider: persona.llm_provider
       })
 
-      const plan = JSON.parse(response.content)
+      const plan = JSON.parse(cleanJsonResponse(response.content))
       let content = plan.content ?? ''
-
-      // Enforce 125-char hard limit for comments
-      if (isComment && content.length > 125) {
-        content = content.slice(0, 122) + '...'
-      }
 
       return {
         type: isComment ? 'create_comment' : 'create_post',
@@ -486,7 +538,7 @@ export class AutopilotService extends EventEmitter {
         provider: persona.llm_provider
       })
 
-      const plan = JSON.parse(response.content)
+      const plan = JSON.parse(cleanJsonResponse(response.content))
       if (!plan.should_post || !plan.submolt || !plan.title || !plan.content) return
 
       // Verify the target submolt is in our priorities
@@ -513,13 +565,15 @@ export class AutopilotService extends EventEmitter {
         await this.executeAction(actionId, action, persona.id, plan.reasoning)
         log.info(`Created original post in m/${targetSubmolt}: "${plan.title}"`)
       } else {
-        // Semi-auto: queue for approval
+        // Semi-auto: queue for approval with context
         enqueueAction({
           payload: action,
           reasoning: plan.reasoning ?? 'Original post creation',
-          priority: 8
+          priority: 8,
+          context: JSON.stringify({ original_post_creation: true, submolt: targetSubmolt })
         })
         log.info(`Queued original post for approval in m/${targetSubmolt}: "${plan.title}"`)
+        this.emit('queue:updated')
       }
     } catch (err) {
       log.error('Post creation error:', err)
@@ -676,7 +730,7 @@ export class AutopilotService extends EventEmitter {
         messages: [
           {
             role: 'system',
-            content: `${persona.system_prompt}\n\nYou are replying to someone who responded to your comment on Moltbook. Style: ${persona.tone_settings.style}.\n\nCRITICAL: Your reply must be 125 characters or fewer. Be concise.\n\nRespond with JSON only: {"content":"your reply"}`
+            content: `${persona.system_prompt}\n\nYou are replying to someone who responded to your comment on Moltbook. Style: ${persona.tone_settings.style}.\n\nWrite a short, natural reply — 1-2 complete sentences. Every sentence must be finished.\n\nRespond with JSON only: {"content":"your reply"}`
           },
           {
             role: 'user',
@@ -689,9 +743,8 @@ export class AutopilotService extends EventEmitter {
         provider: persona.llm_provider
       })
 
-      const plan = JSON.parse(response.content)
-      let content = plan.content ?? ''
-      if (content.length > 125) content = content.slice(0, 122) + '...'
+      const plan = JSON.parse(cleanJsonResponse(response.content))
+      const content = plan.content ?? ''
 
       return {
         type: 'reply',

@@ -199,6 +199,9 @@ export interface AutopilotStatus {
   last_scan_at: string | null
   actions_this_hour: number
   actions_today: number
+  comments_this_hour: number
+  comments_today: number   // tracked against 50/day API limit
+  posts_today: number      // tracked against 1-per-30-min API limit
   next_scan_at: string | null
   emergency_stopped: boolean
 }

@@ -65,6 +65,8 @@ export const IPC = {
   AUTOPILOT_GET_ACTIVITY: 'autopilot:get-activity',
   AUTOPILOT_GET_REPLIES: 'autopilot:get-replies',
   AUTOPILOT_MARK_REPLIES_READ: 'autopilot:mark-replies-read',
+  AUTOPILOT_REJECT_ALL: 'autopilot:reject-all',
+  AUTOPILOT_CLEAR_QUEUE: 'autopilot:clear-queue',
 
   // Search
   SEARCH_EXECUTE: 'search:execute',

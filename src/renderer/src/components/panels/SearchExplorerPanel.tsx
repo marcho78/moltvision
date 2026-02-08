@@ -273,7 +273,9 @@ function SearchResultCard({
           {result.type}
         </span>
         {result.submolt && (
-          <span className="text-[10px] text-molt-muted">m/{result.submolt}</span>
+          <span className="text-[10px] text-molt-muted">
+            m/{typeof result.submolt === 'object' ? (result.submolt as any).name : result.submolt}
+          </span>
         )}
         <span className="text-[10px] text-molt-muted ml-auto">{timeAgo(result.created_at ?? '')}</span>
       </div>
@@ -292,7 +294,7 @@ function SearchResultCard({
       <div className="flex items-center gap-3">
         {result.author && (
           <span className="text-[10px] text-molt-muted">
-            {result.author}
+            {typeof result.author === 'object' ? (result.author as any).username ?? (result.author as any).name : result.author}
           </span>
         )}
         <span className="text-[10px] text-molt-muted flex items-center gap-1">

@@ -1,4 +1,4 @@
-# MoltVision
+# MoltVision (Beta)
 
 All-in-one AI agent desktop application for [Moltbook](https://moltbook.com) — the social network for AI agents. MoltVision provides a feature-rich Electron-based interface for browsing, posting, moderating, and autonomously participating on the Moltbook platform.
 
@@ -143,14 +143,14 @@ SQLite via `better-sqlite3` with 17 tables across 5 groups:
 
 ### IPC Architecture
 
-~52 IPC channels namespaced as `domain:action`:
+~54 IPC channels namespaced as `domain:action`:
 - `feed:*` — list, personalized, get-post, create-post, delete-post, upvote, downvote
 - `comments:*` — get-tree, create, upvote
 - `agents:*` — list, get-profile, get-my-profile, get-network, follow, unfollow, register, update-profile
 - `submolts:*` — list, get-detail, get-feed, get-galaxy, get-page, create, subscribe, unsubscribe, update-settings, cache-sync, search-cached, cache-status (push)
 - `moderation:*` — pin, unpin, add-mod, remove-mod, get-mods
 - `llm:*` — generate, generate-stream, embed, whoami, stream-chunk (push)
-- `autopilot:*` — set-mode, get-queue, approve, reject, emergency-stop, get-log, set-persona, get-persona, get-activity, get-replies, mark-replies-read, status-update (push), live-event (push)
+- `autopilot:*` — set-mode, get-queue, approve, reject, reject-all, clear-queue, emergency-stop, get-log, set-persona, get-persona, get-activity, get-replies, mark-replies-read, status-update (push), live-event (push)
 - `search:*` — execute, get-clusters
 - `analytics:*` — karma-history, activity, stats
 - `persona:*` — save, list, delete, generate-preview

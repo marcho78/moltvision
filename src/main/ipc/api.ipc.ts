@@ -221,10 +221,21 @@ export function registerApiHandlers(mainWindow?: BrowserWindow | null): void {
   })
 
   ipcMain.handle(IPC.FEED_GET_POST, async (_e, payload) => {
+    const normalizePost = (p: any) => ({
+      id: p.id, title: p.title, content: p.content ?? p.body ?? '',
+      author: { id: p.author?.id ?? p.author_id ?? '', username: p.author?.name ?? p.author?.username ?? p.author_name ?? (typeof p.author === 'string' ? p.author : '') },
+      submolt: { id: p.submolt?.name ?? p.submolt?.id ?? p.submolt_id ?? '', name: p.submolt?.display_name ?? p.submolt?.name ?? p.submolt_name ?? (typeof p.submolt === 'string' ? p.submolt : ''), theme_color: p.submolt?.theme_color ?? '#7c5cfc' },
+      karma: p.karma ?? (p.upvotes ?? 0) - (p.downvotes ?? 0),
+      comment_count: p.comment_count ?? p.comments_count ?? 0,
+      our_vote: p.our_vote ?? 'none', is_own: p.is_own ?? false,
+      created_at: p.created_at, updated_at: p.updated_at ?? p.created_at
+    })
     try {
-      return await moltbookClient.getPost(payload.post_id)
+      const raw = await moltbookClient.getPost(payload.post_id)
+      return normalizePost(raw)
     } catch {
-      return getCachedPost(payload.post_id)
+      const cached = getCachedPost(payload.post_id)
+      return cached ? normalizePost(cached) : null
     }
   })
 
@@ -246,11 +257,22 @@ export function registerApiHandlers(mainWindow?: BrowserWindow | null): void {
 
   // --- Comments ---
   ipcMain.handle(IPC.COMMENTS_GET_TREE, async (_e, payload) => {
+    // Recursively normalize comment author fields so raw API objects never reach React
+    const normalizeComment = (c: any): any => ({
+      ...c,
+      author: typeof c.author === 'object' && c.author !== null
+        ? { id: c.author.id ?? '', username: c.author.name ?? c.author.username ?? '' }
+        : { id: '', username: typeof c.author === 'string' ? c.author : '' },
+      children: Array.isArray(c.children) ? c.children.map(normalizeComment) : []
+    })
     try {
-      return await moltbookClient.getCommentTree(payload.post_id, payload.sort)
+      const raw = await moltbookClient.getCommentTree(payload.post_id, payload.sort)
+      const comments = Array.isArray(raw?.comments) ? raw.comments.map(normalizeComment)
+        : Array.isArray(raw) ? raw.map(normalizeComment) : []
+      return { comments }
     } catch {
       const cached = getCommentsByPost(payload.post_id)
-      return { comments: cached }
+      return { comments: Array.isArray(cached) ? cached.map(normalizeComment) : [] }
     }
   })
 
@@ -389,7 +411,18 @@ export function registerApiHandlers(mainWindow?: BrowserWindow | null): void {
   })
 
   ipcMain.handle(IPC.SUBMOLTS_GET_FEED, async (_e, payload) => {
-    return await moltbookClient.getSubmoltFeed(payload.submolt_name, { sort: payload.sort, limit: payload.limit })
+    const raw = await moltbookClient.getSubmoltFeed(payload.submolt_name, { sort: payload.sort, limit: payload.limit })
+    const posts: any[] = Array.isArray(raw) ? raw : (raw?.posts ?? [])
+    const normalized = posts.map((p: any) => ({
+      id: p.id, title: p.title, content: p.content ?? p.body ?? '',
+      author: { id: p.author?.id ?? p.author?.name ?? '', username: p.author?.name ?? p.author?.username ?? (typeof p.author === 'string' ? p.author : '') },
+      submolt: { id: p.submolt?.name ?? p.submolt?.id ?? (typeof p.submolt === 'string' ? p.submolt : ''), name: p.submolt?.display_name ?? p.submolt?.name ?? (typeof p.submolt === 'string' ? p.submolt : ''), theme_color: p.submolt?.theme_color ?? '#7c5cfc' },
+      karma: p.karma ?? (p.upvotes ?? 0) - (p.downvotes ?? 0),
+      comment_count: p.comment_count ?? p.comments_count ?? 0,
+      our_vote: p.our_vote ?? 'none', is_own: p.is_own ?? false,
+      created_at: p.created_at, updated_at: p.updated_at ?? p.created_at
+    }))
+    return { posts: normalized, next_offset: raw?.next_offset ?? null, has_more: raw?.has_more ?? false }
   })
 
   ipcMain.handle(IPC.SUBMOLTS_GET_GALAXY, async () => {

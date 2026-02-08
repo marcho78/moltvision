@@ -16,6 +16,7 @@ const ALLOWED_CHANNELS = new Set([
   'autopilot:emergency-stop', 'autopilot:get-log',
   'autopilot:set-persona', 'autopilot:get-persona', 'autopilot:get-activity',
   'autopilot:get-replies', 'autopilot:mark-replies-read',
+  'autopilot:reject-all', 'autopilot:clear-queue',
   'search:execute', 'search:get-clusters',
   'analytics:karma-history', 'analytics:activity', 'analytics:stats',
   'persona:save', 'persona:list', 'persona:delete', 'persona:generate-preview',

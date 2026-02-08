@@ -1,6 +1,59 @@
 # Changelog
 
-## 1.2.0 — 2026-02-07
+## 0.3.1 — 2026-02-07
+
+Stability patch — fixes React crash on autopilot scanning, hardens API data normalization, improves autopilot UI and rate limit enforcement.
+
+### Bug Fixes
+- Fixed React crash "Objects are not valid as a React child (found: object with keys {id, name, display_name})" during autopilot scanning — raw Moltbook API objects (submolt, author) were reaching JSX rendering
+- Fixed `FEED_GET_POST` IPC handler returning raw API data without normalizing nested submolt/author objects
+- Fixed `COMMENTS_GET_TREE` IPC handler — comment author fields now recursively normalized through the entire tree
+- Fixed `SUBMOLTS_GET_FEED` IPC handler returning unnormalized post data
+- Fixed LLM JSON parsing failures when responses are wrapped in markdown fences — added `cleanJsonResponse()` extractor with proper bracket matching
+- Fixed Grok provider not sending `response_format: { type: 'json_object' }` when `json_mode` is true
+
+### Defensive Rendering
+- Added `sanitizeEvent()` and `safePrimitive()` to `useAutopilotEvents` hook — all live event fields are coerced to primitive strings before entering the Zustand store, preventing objects from reaching React children
+- Added `safeStr()` utility across AutopilotPanel — wraps every external data interpolation in LiveAgentFeed, ActionQueueItem, ActivityTab, RepliesTab, TargetSubmolts, and PersonaSelector
+- TargetSubmolts now normalizes submolt data on load (matching Sidebar's normalization pattern) instead of setting raw API responses
+
+### Autopilot Service Improvements
+- Action cooldown changed from 5s to 21s (API enforces 1 comment per 20 seconds)
+- Rate limits clamped to API maximums: max_posts_per_hour capped at 2 (API: 1 per 30 min), max_comments_per_hour capped at 10
+- Daily comment limit enforced (50/day API limit) — scan cycle exits early when daily cap is reached
+- Detailed `scan:progress` events emitted at 6 phases: evaluating, evaluated, planning, queued, executed, with post context
+- Semi-auto mode now stores `original_post` context in action queue payload for richer queue item display
+- `queue:updated` event emitted after enqueueing actions in semi-auto mode
+
+### AutopilotPanel UI Enhancements
+- LiveAgentFeed redesigned as console-style "Agent Thinking" log with phase-based color coding
+- ActionQueueItem now shows original post context (title, submolt, karma) alongside the draft action
+- Editable draft content in queue items before approving
+- Action type badges (comment, upvote, downvote, post) with distinct styling
+- QueueTab: added "Reject All" and "Clear History" bulk actions
+- QueueTab: auto-refreshes and switches to Queue tab on `queue_updated` events
+- QueueTab: separates pending actions from recent completed/rejected history
+- ControlsTab: shows comments/hour, comments/day progress bars, and posts/today counter
+- Removed duplicate `useAutopilotEvents()` call (now only in App.tsx)
+
+### PersonaStudioPanel
+- Added API rate limits info box showing post, comment, and general rate limits
+- Slider ranges clamped to API maximums (max_posts_per_hour: 2, max_comments_per_hour: 10)
+
+### SearchExplorerPanel
+- Defensive type checks on `result.submolt` and `result.author` rendering — handles both string and object shapes
+
+### New IPC Channels
+- `autopilot:reject-all` — bulk reject all pending queue items
+- `autopilot:clear-queue` — clear completed/rejected actions from history
+
+### Domain Types
+- `AutopilotStatus` extended with `comments_this_hour`, `comments_today`, `posts_today` fields
+
+### New Query
+- `clearCompletedActions()` in queue.queries.ts — deletes completed/failed/rejected actions from action_queue
+
+## 0.3.0 — 2026-02-07
 
 Autonomous agent conversation system — persona-driven decision-making, engagement tracking, content origination, reply monitoring, and real-time observability.
 
@@ -107,7 +160,7 @@ Autonomous agent conversation system — persona-driven decision-making, engagem
 ### New File
 - `src/main/db/queries/engagement.queries.ts` — all engagement tracking, performance, and reply inbox query helpers (recordEngagement, hasEngaged, countEngagementsInPeriod, getEngagementHistory, countRepliesInThread, addToReplyInbox, getUnrespondedReplies, markReplyResponded, getRecentAgentPostIds, getAllReplies, getUnreadReplyCount, markRepliesRead)
 
-## 1.1.0 — 2026-02-07
+## 0.2.0 — 2026-02-07
 
 Major overhaul of all panels, API response handling, submolt caching, feed system, and UI resilience.
 
@@ -236,7 +289,7 @@ Major overhaul of all panels, API response handling, submolt caching, feed syste
 - Cluster centers calculated from constituent points
 - Deterministic color mapping per type (post = purple, comment = green, agent = blue, submolt = yellow)
 
-## 1.0.0 — 2025-02-06
+## 0.1.0 — 2025-02-06
 
 Initial release.
 

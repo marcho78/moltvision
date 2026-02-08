@@ -1,9 +1,21 @@
 import React, { useEffect, useState, useCallback } from 'react'
 import { useStore } from '../../stores'
-import { useAutopilotEvents } from '../../hooks/useAutopilotEvents'
+// useAutopilotEvents is called in App.tsx — not here (avoids duplicate listeners)
 import { invoke } from '../../lib/ipc'
 import { IPC } from '@shared/ipc-channels'
 import type { OperationMode, AgentAction, AgentPersona, AgentEngagement, ReplyInboxEntry } from '@shared/domain.types'
+
+/** Defensive: ensure a value is rendered as a safe React child (string), never an object */
+function safeStr(val: unknown): string {
+  if (val == null) return ''
+  if (typeof val === 'string') return val
+  if (typeof val === 'number' || typeof val === 'boolean') return String(val)
+  if (typeof val === 'object') {
+    const obj = val as Record<string, unknown>
+    return String(obj.display_name ?? obj.name ?? obj.username ?? obj.title ?? JSON.stringify(val))
+  }
+  return String(val)
+}
 
 // ─── Tab Type ────────────────────────────────────────────
 
@@ -99,7 +111,7 @@ function PersonaSelector() {
       </select>
       {savedPersonas.length > 0 && (
         <p className="text-[10px] text-molt-muted mt-1.5">
-          {savedPersonas.find(p => p.id === activePersonaId)?.description || 'Configure personas in the Persona Studio panel'}
+          {safeStr(savedPersonas.find(p => p.id === activePersonaId)?.description) || 'Configure personas in the Persona Studio panel'}
         </p>
       )}
     </div>
@@ -124,7 +136,23 @@ function TargetSubmolts() {
       invoke<any>(IPC.SUBMOLTS_LIST)
         .then((result: any) => {
           const list = Array.isArray(result) ? result : (result?.submolts ?? [])
-          if (list.length > 0) setSubmolts(list)
+          if (list.length > 0) {
+            // Normalize to ensure all fields are proper primitives (match Sidebar normalization)
+            const normalized = list.map((s: any) => ({
+              id: s.id ?? s.name ?? '',
+              name: typeof s.name === 'string' ? s.name : String(s.name ?? ''),
+              display_name: typeof s.display_name === 'string' ? s.display_name : String(s.display_name ?? s.name ?? ''),
+              description: s.description ?? '',
+              theme_color: s.theme_color ?? '#7c5cfc',
+              subscriber_count: s.subscriber_count ?? s.subscribers ?? 0,
+              post_count: s.post_count ?? 0,
+              is_subscribed: s.is_subscribed ?? false,
+              moderators: s.moderators ?? [],
+              rules: s.rules ?? [],
+              created_at: s.created_at ?? ''
+            }))
+            setSubmolts(normalized)
+          }
         })
         .catch(() => {})
     }
@@ -195,9 +223,9 @@ function TargetSubmolts() {
               .filter((s: any) => priorities[s.name] === undefined)
               .slice(0, 10)
               .map((s: any) => (
-                <button key={s.name} onClick={() => addSubmolt(s.name)}
+                <button key={safeStr(s.name)} onClick={() => addSubmolt(safeStr(s.name))}
                   className="px-2 py-0.5 text-[10px] rounded-full bg-molt-surface text-molt-muted hover:text-molt-text hover:bg-molt-accent/10 border border-molt-border transition-colors">
-                  + m/{s.name}
+                  + m/{safeStr(s.name)}
                 </button>
               ))}
           </div>
@@ -229,11 +257,11 @@ function TargetSubmolts() {
         <div className="space-y-1.5">
           {entries.map(([name, priority]) => (
             <div key={name} className="flex items-center gap-2 bg-molt-bg rounded-lg px-2.5 py-1.5">
-              <span className="text-xs font-medium text-molt-text w-24 truncate" title={`m/${name}`}>m/{name}</span>
-              <input type="range" min="1" max="10" step="1" value={priority}
+              <span className="text-xs font-medium text-molt-text w-24 truncate" title={`m/${name}`}>m/{safeStr(name)}</span>
+              <input type="range" min="1" max="10" step="1" value={typeof priority === 'number' ? priority : 5}
                 onChange={(e) => setPriority(name, parseInt(e.target.value))}
                 className="flex-1 h-1" />
-              <span className="text-[10px] text-molt-muted w-4 text-center">{priority}</span>
+              <span className="text-[10px] text-molt-muted w-4 text-center">{safeStr(priority)}</span>
               <button onClick={() => removeSubmolt(name)}
                 className="text-molt-muted hover:text-molt-error text-sm transition-colors w-4">&times;</button>
             </div>
@@ -303,88 +331,82 @@ function EmergencyStop() {
   )
 }
 
-// ─── Live Agent Feed ─────────────────────────────────────
+// ─── Live Agent Thinking Log ─────────────────────────────
 
 function LiveAgentFeed() {
   const { liveEvents, autopilotStatus } = useStore()
 
-  // Latest scan event for status line
-  const latestScan = liveEvents.find(e => e.type === 'scan')
-  // Recent action events
-  const recentActions = liveEvents.filter(e => e.type === 'action').slice(0, 5)
-
   if (autopilotStatus.mode === 'off') return null
+
+  // Phase-based styling for the thinking log
+  const phaseStyle: Record<string, { icon: string; color: string }> = {
+    start: { icon: '>', color: 'text-molt-accent' },
+    feed: { icon: '~', color: 'text-molt-info' },
+    submolt: { icon: '~', color: 'text-molt-info' },
+    evaluate: { icon: '?', color: 'text-molt-warning' },
+    evaluating: { icon: '?', color: 'text-molt-muted' },
+    evaluated: { icon: '-', color: 'text-molt-muted' },
+    planning: { icon: '+', color: 'text-molt-warning' },
+    queued: { icon: '#', color: 'text-molt-accent' },
+    executed: { icon: '!', color: 'text-molt-success' },
+    done: { icon: '*', color: 'text-molt-success' },
+    error: { icon: 'x', color: 'text-molt-error' }
+  }
+
+  // Show all events in a scrollable console-style log
+  const allEvents = liveEvents.slice(0, 30) // last 30 events
 
   return (
     <div className="panel-card space-y-2">
-      <h3 className="text-sm font-medium">Live Agent Status</h3>
+      <div className="flex items-center justify-between">
+        <h3 className="text-sm font-medium">Agent Thinking</h3>
+        {autopilotStatus.is_running && (
+          <div className="flex items-center gap-1.5">
+            <div className="w-2 h-2 rounded-full bg-molt-accent animate-pulse" />
+            <span className="text-[10px] text-molt-accent">Live</span>
+          </div>
+        )}
+      </div>
 
-      {/* Current scan status line */}
-      {autopilotStatus.is_running && latestScan?.message && (
-        <div className="flex items-center gap-2 bg-molt-bg rounded-lg px-3 py-2">
-          <div className={`w-2 h-2 rounded-full ${
-            latestScan.phase === 'done' ? 'bg-molt-success' :
-            latestScan.phase === 'error' ? 'bg-molt-error' :
-            'bg-molt-accent animate-pulse'
-          }`} />
-          <span className="text-xs text-molt-text">{latestScan.message}</span>
-        </div>
-      )}
-
-      {!autopilotStatus.is_running && !latestScan && (
+      {allEvents.length === 0 && (
         <div className="text-xs text-molt-muted bg-molt-bg rounded-lg px-3 py-2">
           Waiting for first scan cycle...
         </div>
       )}
 
-      {/* Recent actions */}
-      {recentActions.length > 0 && (
-        <div className="space-y-1">
-          <span className="text-[10px] text-molt-muted uppercase tracking-wider">Recent Actions</span>
-          {recentActions.map((event, i) => {
-            const actionColors: Record<string, string> = {
-              create_post: 'text-molt-accent',
-              create_comment: 'text-molt-success',
-              reply: 'text-molt-info',
-              upvote: 'text-molt-warning',
-              downvote: 'text-molt-error'
+      {allEvents.length > 0 && (
+        <div className="bg-molt-bg rounded-lg p-2 max-h-64 overflow-y-auto space-y-0.5 font-mono">
+          {allEvents.map((event, i) => {
+            if (event.type === 'action') {
+              // Action events (executed actions)
+              const actionLabels: Record<string, string> = {
+                create_post: 'POSTED', create_comment: 'COMMENTED', reply: 'REPLIED',
+                upvote: 'UPVOTED', downvote: 'DOWNVOTED'
+              }
+              return (
+                <div key={`${event.timestamp}-${i}`} className="text-[11px] leading-relaxed">
+                  <span className="text-molt-muted">{new Date(event.timestamp).toLocaleTimeString()} </span>
+                  <span className="text-molt-success font-semibold">{actionLabels[safeStr(event.action_type)] ?? safeStr(event.action_type)} </span>
+                  <span className="text-molt-text">
+                    {event.title ? `"${safeStr(event.title)}"` : event.content ? `"${safeStr(event.content).slice(0, 80)}"` : ''}
+                    {event.submolt ? ` in m/${safeStr(event.submolt)}` : ''}
+                  </span>
+                </div>
+              )
             }
-            const actionLabels: Record<string, string> = {
-              create_post: 'Posted',
-              create_comment: 'Commented',
-              reply: 'Replied',
-              upvote: 'Upvoted',
-              downvote: 'Downvoted'
-            }
+
+            // Scan progress events (agent thinking)
+            const style = phaseStyle[safeStr(event.phase)] ?? { icon: '.', color: 'text-molt-muted' }
             return (
-              <div key={`${event.timestamp}-${i}`} className="flex items-start gap-2 text-xs bg-molt-bg rounded px-2.5 py-1.5">
-                <span className={`font-semibold shrink-0 ${actionColors[event.action_type ?? ''] ?? 'text-molt-muted'}`}>
-                  {actionLabels[event.action_type ?? ''] ?? event.action_type}
-                </span>
-                <span className="text-molt-text truncate flex-1">
-                  {event.title
-                    ? `"${event.title}" in m/${event.submolt ?? '?'}`
-                    : event.content
-                      ? event.content.slice(0, 60) + (event.content.length > 60 ? '...' : '')
-                      : event.submolt
-                        ? `in m/${event.submolt}`
-                        : ''
-                  }
-                </span>
-                <span className="text-[10px] text-molt-muted shrink-0">
-                  {new Date(event.timestamp).toLocaleTimeString()}
+              <div key={`${event.timestamp}-${i}`} className="text-[11px] leading-relaxed">
+                <span className="text-molt-muted">{new Date(event.timestamp).toLocaleTimeString()} </span>
+                <span className={`${style.color}`}>[{style.icon}] </span>
+                <span className={event.phase === 'evaluated' || event.phase === 'evaluating' ? 'text-molt-muted' : 'text-molt-text'}>
+                  {safeStr(event.message)}
                 </span>
               </div>
             )
           })}
-        </div>
-      )}
-
-      {autopilotStatus.is_running && recentActions.length === 0 && latestScan?.phase === 'done' && (
-        <div className="text-[10px] text-molt-muted">
-          Last scan found no posts to engage with. Next scan at {
-            autopilotStatus.next_scan_at ? new Date(autopilotStatus.next_scan_at).toLocaleTimeString() : '...'
-          }
         </div>
       )}
     </div>
@@ -403,27 +425,58 @@ function ControlsTab() {
       <TargetSubmolts />
       <LiveAgentFeed />
 
-      <div className="grid grid-cols-3 gap-3">
-        <div className="panel-card p-3 text-center">
-          <div className="text-xs text-molt-muted">Actions/Hour</div>
-          <div className="text-xl font-bold text-molt-text">{autopilotStatus.actions_this_hour}</div>
+      {/* Engagement stats — real counts from agent_engagements */}
+      <div className="panel-card space-y-2.5">
+        <h3 className="text-sm font-medium">Agent Activity</h3>
+        <div className="grid grid-cols-3 gap-3">
+          <div className="bg-molt-bg rounded-lg p-2.5 text-center">
+            <div className="text-[10px] text-molt-muted">Comments/Hour</div>
+            <div className="text-lg font-bold text-molt-text">{autopilotStatus.comments_this_hour ?? 0}</div>
+          </div>
+          <div className="bg-molt-bg rounded-lg p-2.5 text-center">
+            <div className="text-[10px] text-molt-muted">Comments Today</div>
+            <div className={`text-lg font-bold ${(autopilotStatus.comments_today ?? 0) >= 45 ? 'text-molt-warning' : (autopilotStatus.comments_today ?? 0) >= 50 ? 'text-molt-error' : 'text-molt-text'}`}>
+              {autopilotStatus.comments_today ?? 0}
+              <span className="text-xs text-molt-muted font-normal"> / 50</span>
+            </div>
+          </div>
+          <div className="bg-molt-bg rounded-lg p-2.5 text-center">
+            <div className="text-[10px] text-molt-muted">Posts Today</div>
+            <div className="text-lg font-bold text-molt-text">{autopilotStatus.posts_today ?? 0}</div>
+          </div>
         </div>
-        <div className="panel-card p-3 text-center">
-          <div className="text-xs text-molt-muted">Actions Today</div>
-          <div className="text-xl font-bold text-molt-text">{autopilotStatus.actions_today}</div>
+
+        {/* Daily comment limit progress bar */}
+        <div className="space-y-1">
+          <div className="flex items-center justify-between text-[10px]">
+            <span className="text-molt-muted">Daily comment limit</span>
+            <span className="text-molt-muted">{autopilotStatus.comments_today ?? 0} / 50</span>
+          </div>
+          <div className="h-1.5 bg-molt-bg rounded-full overflow-hidden">
+            <div
+              className={`h-full rounded-full transition-all ${
+                (autopilotStatus.comments_today ?? 0) >= 50 ? 'bg-molt-error' :
+                (autopilotStatus.comments_today ?? 0) >= 40 ? 'bg-molt-warning' : 'bg-molt-success'
+              }`}
+              style={{ width: `${Math.min(((autopilotStatus.comments_today ?? 0) / 50) * 100, 100)}%` }}
+            />
+          </div>
         </div>
-        <div className="panel-card p-3 text-center">
-          <div className="text-xs text-molt-muted">Status</div>
-          <div className={`text-xl font-bold ${
+
+        {/* Status indicator */}
+        <div className="flex items-center justify-center gap-2 pt-1">
+          <div className={`w-2 h-2 rounded-full ${
+            autopilotStatus.emergency_stopped ? 'bg-molt-error' :
+            autopilotStatus.is_running ? 'bg-molt-success animate-pulse' : 'bg-molt-muted'
+          }`} />
+          <span className={`text-xs font-medium ${
             autopilotStatus.emergency_stopped ? 'text-molt-error' :
             autopilotStatus.is_running ? 'text-molt-success' : 'text-molt-muted'
           }`}>
-            {autopilotStatus.emergency_stopped ? 'STOPPED' : autopilotStatus.is_running ? 'ACTIVE' : 'IDLE'}
-          </div>
+            {autopilotStatus.emergency_stopped ? 'EMERGENCY STOPPED' : autopilotStatus.is_running ? 'ACTIVE' : 'IDLE'}
+          </span>
         </div>
       </div>
-
-      <RateLimitDashboard />
       <EmergencyStop />
 
       {autopilotStatus.last_scan_at && (
@@ -512,10 +565,10 @@ function ActivityTab() {
               </span>
             </div>
             {entry.content_sent && (
-              <p className="text-xs text-molt-text line-clamp-2 mb-1">{entry.content_sent}</p>
+              <p className="text-xs text-molt-text line-clamp-2 mb-1">{safeStr(entry.content_sent)}</p>
             )}
             {entry.reasoning && (
-              <p className="text-[10px] text-molt-muted line-clamp-1">{entry.reasoning}</p>
+              <p className="text-[10px] text-molt-muted line-clamp-1">{safeStr(entry.reasoning)}</p>
             )}
           </div>
         )
@@ -526,14 +579,29 @@ function ActivityTab() {
 
 // ─── Tab 3: Action Queue ─────────────────────────────────
 
-function ActionQueueItem({ action }: { action: AgentAction }) {
+function ActionQueueItem({ action, onRefresh }: { action: AgentAction; onRefresh: () => void }) {
   const { removeFromQueue, addNotification } = useStore()
+  const [editedContent, setEditedContent] = useState(action.payload.content ?? '')
+  const [editing, setEditing] = useState(false)
+
+  // Parse context to get original post info
+  let originalPost: { title?: string; content?: string; submolt?: string; author?: string; karma?: number } | null = null
+  try {
+    if (action.context) {
+      const ctx = JSON.parse(action.context)
+      originalPost = ctx.original_post ?? null
+    }
+  } catch { /* ignore parse errors */ }
 
   const handleApprove = async () => {
     try {
-      await invoke(IPC.AUTOPILOT_APPROVE, { action_id: action.id })
+      await invoke(IPC.AUTOPILOT_APPROVE, {
+        action_id: action.id,
+        edited_content: editing ? editedContent : undefined
+      })
       removeFromQueue(action.id)
       addNotification('Action approved and executing', 'success')
+      onRefresh()
     } catch (err: any) {
       addNotification(err.message || 'Approve failed', 'error')
     }
@@ -543,6 +611,7 @@ function ActionQueueItem({ action }: { action: AgentAction }) {
     try {
       await invoke(IPC.AUTOPILOT_REJECT, { action_id: action.id })
       removeFromQueue(action.id)
+      onRefresh()
     } catch (err: any) {
       addNotification(err.message || 'Reject failed', 'error')
     }
@@ -557,25 +626,99 @@ function ActionQueueItem({ action }: { action: AgentAction }) {
     rejected: 'text-molt-muted'
   }
 
+  const actionLabels: Record<string, { label: string; color: string }> = {
+    create_post: { label: 'NEW POST', color: 'bg-molt-accent/20 text-molt-accent' },
+    create_comment: { label: 'COMMENT', color: 'bg-molt-success/20 text-molt-success' },
+    reply: { label: 'REPLY', color: 'bg-molt-info/20 text-molt-info' },
+    upvote: { label: 'UPVOTE', color: 'bg-molt-warning/20 text-molt-warning' },
+    downvote: { label: 'DOWNVOTE', color: 'bg-molt-error/20 text-molt-error' }
+  }
+
+  const badge = actionLabels[action.payload.type] ?? { label: action.payload.type, color: 'bg-molt-surface text-molt-muted' }
+
   return (
-    <div className="panel-card p-3">
-      <div className="flex items-center justify-between mb-2">
+    <div className="panel-card p-3 space-y-2.5">
+      {/* Header: action type, status, time */}
+      <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <span className="badge bg-molt-accent/20 text-molt-accent text-xs">{action.payload.type}</span>
+          <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${badge.color}`}>{badge.label}</span>
           <span className={`text-xs ${statusColors[action.status]}`}>{action.status}</span>
+          {action.payload.submolt_name && (
+            <span className="text-[10px] text-molt-muted">m/{safeStr(action.payload.submolt_name)}</span>
+          )}
         </div>
-        <span className="text-xs text-molt-muted">
+        <span className="text-[10px] text-molt-muted">
           {new Date(action.created_at).toLocaleTimeString()}
         </span>
       </div>
-      {action.payload.content && (
-        <p className="text-xs text-molt-text mb-2 line-clamp-3">{action.payload.content}</p>
+
+      {/* Original post context (what the agent is responding to) */}
+      {originalPost && (
+        <div className="bg-molt-bg rounded-lg p-2.5 border-l-2 border-molt-muted/30">
+          <div className="text-[10px] text-molt-muted mb-1 uppercase tracking-wider">Responding to:</div>
+          <div className="text-xs font-medium text-molt-text mb-0.5">{safeStr(originalPost.title)}</div>
+          {originalPost.content && (
+            <p className="text-[11px] text-molt-muted line-clamp-3">{safeStr(originalPost.content)}</p>
+          )}
+          <div className="flex gap-2 mt-1 text-[10px] text-molt-muted">
+            {originalPost.author && <span>by {safeStr(originalPost.author)}</span>}
+            {originalPost.submolt && <span>m/{safeStr(originalPost.submolt)}</span>}
+            {originalPost.karma != null && <span>{originalPost.karma} karma</span>}
+          </div>
+        </div>
       )}
-      <p className="text-xs text-molt-muted mb-2">{action.reasoning}</p>
+
+      {/* Agent's draft content */}
+      {action.payload.content && (
+        <div className="space-y-1">
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] text-molt-muted uppercase tracking-wider">
+              Agent's draft{action.payload.type === 'create_comment' ? ` (${editedContent.length} chars)` : ''}:
+            </span>
+            {action.status === 'pending' && !editing && (
+              <button onClick={() => setEditing(true)}
+                className="text-[10px] text-molt-accent hover:text-molt-accent-hover transition-colors">
+                Edit
+              </button>
+            )}
+          </div>
+          {editing ? (
+            <textarea
+              value={editedContent}
+              onChange={(e) => setEditedContent(e.target.value)}
+              maxLength={undefined}
+              rows={action.payload.type === 'create_post' ? 5 : 2}
+              className="input-field w-full text-xs font-mono resize-y"
+            />
+          ) : (
+            <div className="bg-molt-surface rounded-lg p-2.5 border border-molt-border">
+              {action.payload.title && (
+                <div className="text-xs font-semibold text-molt-text mb-1">{safeStr(action.payload.title)}</div>
+              )}
+              <p className="text-xs text-molt-text whitespace-pre-wrap">{safeStr(action.payload.content)}</p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Reasoning */}
+      {action.reasoning && (
+        <div className="text-[10px] text-molt-muted">
+          <span className="uppercase tracking-wider">Reasoning:</span> {safeStr(action.reasoning)}
+        </div>
+      )}
+
+      {/* Actions */}
       {action.status === 'pending' && (
-        <div className="flex gap-2">
-          <button onClick={handleApprove} className="btn-primary text-xs py-1 px-3">Approve</button>
-          <button onClick={handleReject} className="btn-danger text-xs py-1 px-3">Reject</button>
+        <div className="flex gap-2 pt-1">
+          <button onClick={handleApprove} className="btn-primary text-xs py-1.5 px-4">
+            {editing ? 'Approve (edited)' : 'Approve'}
+          </button>
+          <button onClick={handleReject} className="btn-danger text-xs py-1.5 px-4">Reject</button>
+          {editing && (
+            <button onClick={() => { setEditing(false); setEditedContent(action.payload.content ?? '') }}
+              className="text-xs text-molt-muted hover:text-molt-text transition-colors px-2">Cancel edit</button>
+          )}
         </div>
       )}
     </div>
@@ -583,30 +726,99 @@ function ActionQueueItem({ action }: { action: AgentAction }) {
 }
 
 function QueueTab() {
-  const { actionQueue, setActionQueue, autopilotStatus } = useStore()
+  const { actionQueue, setActionQueue, autopilotStatus, liveEvents, addNotification } = useStore()
 
-  useEffect(() => {
-    invoke<{ actions: AgentAction[] }>(IPC.AUTOPILOT_GET_QUEUE, {})
-      .then((result) => setActionQueue(result.actions))
-      .catch(console.error)
+  const fetchQueue = useCallback(async () => {
+    try {
+      const result = await invoke<{ actions: AgentAction[] }>(IPC.AUTOPILOT_GET_QUEUE, {})
+      setActionQueue(result.actions)
+    } catch (err) {
+      console.error('Failed to load queue:', err)
+    }
   }, [setActionQueue])
+
+  // Load on mount
+  useEffect(() => { fetchQueue() }, [fetchQueue])
+
+  // Auto-refresh when queue_updated event arrives
+  const lastQueueEvent = liveEvents.find(e => e.type === 'queue_updated')
+  useEffect(() => {
+    if (lastQueueEvent) fetchQueue()
+  }, [lastQueueEvent?.timestamp, fetchQueue])
+
+  const pendingActions = actionQueue.filter(a => a.status === 'pending')
+  const otherActions = actionQueue.filter(a => a.status !== 'pending')
+
+  const handleRejectAll = async () => {
+    try {
+      const result = await invoke<{ rejected: number }>(IPC.AUTOPILOT_REJECT_ALL)
+      addNotification(`Rejected ${result.rejected} pending actions`, 'warning')
+      fetchQueue()
+    } catch (err: any) {
+      addNotification(err.message || 'Reject all failed', 'error')
+    }
+  }
+
+  const handleClearHistory = async () => {
+    try {
+      const result = await invoke<{ cleared: number }>(IPC.AUTOPILOT_CLEAR_QUEUE)
+      addNotification(`Cleared ${result.cleared} completed actions`, 'success')
+      fetchQueue()
+    } catch (err: any) {
+      addNotification(err.message || 'Clear failed', 'error')
+    }
+  }
 
   return (
     <div className="space-y-3">
       {autopilotStatus.mode === 'semi-auto' && (
         <div className="text-xs text-molt-muted bg-molt-surface rounded-lg px-3 py-2">
-          Semi-auto mode: actions are queued for your approval before executing.
+          Semi-auto mode: review and approve each action before execution. You can edit the agent's draft before approving.
         </div>
       )}
 
-      <h3 className="text-sm font-medium">Pending Actions ({actionQueue.filter(a => a.status === 'pending').length})</h3>
-      <div className="space-y-2">
-        {actionQueue.length === 0 ? (
-          <div className="text-molt-muted text-sm text-center py-6">No queued actions</div>
-        ) : (
-          actionQueue.map((action) => <ActionQueueItem key={action.id} action={action} />)
-        )}
+      <div className="flex items-center justify-between">
+        <h3 className="text-sm font-medium">Pending Actions ({pendingActions.length})</h3>
+        <div className="flex gap-2">
+          {pendingActions.length > 1 && (
+            <button onClick={handleRejectAll}
+              className="text-[10px] text-molt-error hover:text-molt-error/80 transition-colors">
+              Reject All
+            </button>
+          )}
+          <button onClick={fetchQueue} className="text-[10px] text-molt-accent hover:text-molt-accent-hover transition-colors">
+            Refresh
+          </button>
+        </div>
       </div>
+
+      <div className="space-y-3">
+        {pendingActions.length === 0 && otherActions.length === 0 && (
+          <div className="text-molt-muted text-sm text-center py-6">
+            No queued actions. In semi-auto mode, the agent will propose actions here for your review.
+          </div>
+        )}
+        {pendingActions.map((action) => (
+          <ActionQueueItem key={action.id} action={action} onRefresh={fetchQueue} />
+        ))}
+      </div>
+
+      {otherActions.length > 0 && (
+        <>
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-medium text-molt-muted">Recent ({otherActions.length})</h3>
+            <button onClick={handleClearHistory}
+              className="text-[10px] text-molt-muted hover:text-molt-error transition-colors">
+              Clear History
+            </button>
+          </div>
+          <div className="space-y-2">
+            {otherActions.slice(0, 10).map((action) => (
+              <ActionQueueItem key={action.id} action={action} onRefresh={fetchQueue} />
+            ))}
+          </div>
+        </>
+      )}
     </div>
   )
 }
@@ -671,7 +883,7 @@ function RepliesTab() {
           className={`panel-card p-3 ${!reply.is_read ? 'border-molt-accent/30 bg-molt-accent/5' : ''}`}>
           <div className="flex items-center justify-between mb-1.5">
             <div className="flex items-center gap-2">
-              <span className="text-xs font-semibold text-molt-text">{reply.reply_author}</span>
+              <span className="text-xs font-semibold text-molt-text">{safeStr(reply.reply_author)}</span>
               {!reply.is_read && (
                 <span className="w-1.5 h-1.5 rounded-full bg-molt-accent" />
               )}
@@ -686,11 +898,11 @@ function RepliesTab() {
 
           {reply.agent_original_content && (
             <p className="text-[10px] text-molt-muted mb-1 line-clamp-1">
-              You said: {reply.agent_original_content}
+              You said: {safeStr(reply.agent_original_content)}
             </p>
           )}
 
-          <p className="text-xs text-molt-text mb-2">{reply.reply_content}</p>
+          <p className="text-xs text-molt-text mb-2">{safeStr(reply.reply_content)}</p>
 
           <div className="flex gap-2">
             <button onClick={() => handleViewThread(reply.parent_post_id)}
@@ -714,10 +926,18 @@ function RepliesTab() {
 
 export function AutopilotPanel() {
   const [activeTab, setActiveTab] = useState<AutopilotTab>('controls')
-  const { unreadReplyCount, actionQueue } = useStore()
-  useAutopilotEvents()
+  const { unreadReplyCount, actionQueue, liveEvents } = useStore()
+  // NOTE: useAutopilotEvents() is called in App.tsx — do NOT call it here too (causes duplicate events)
 
   const pendingCount = actionQueue.filter(a => a.status === 'pending').length
+
+  // Auto-switch to Queue tab when new actions are queued for approval
+  const lastQueueEvent = liveEvents.find(e => e.type === 'queue_updated')
+  useEffect(() => {
+    if (lastQueueEvent && activeTab !== 'queue') {
+      setActiveTab('queue')
+    }
+  }, [lastQueueEvent?.timestamp])
 
   const tabs: Array<{ id: AutopilotTab; label: string; badge?: number }> = [
     { id: 'controls', label: 'Controls' },

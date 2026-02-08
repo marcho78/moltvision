@@ -59,6 +59,63 @@ export class TokenLimitExceededError extends LLMError {
   }
 }
 
+// --- JSON cleaning helper ---
+// LLMs frequently return JSON wrapped in markdown fences or with trailing text.
+// This extracts just the JSON object/array so JSON.parse() works reliably.
+export function cleanJsonResponse(raw: string): string {
+  let s = raw.trim()
+
+  // Strip opening ```json or ``` line
+  if (s.startsWith('```')) {
+    const firstNewline = s.indexOf('\n')
+    if (firstNewline !== -1) {
+      s = s.slice(firstNewline + 1)
+    }
+  }
+  // Strip trailing ``` line
+  if (s.trimEnd().endsWith('```')) {
+    s = s.slice(0, s.lastIndexOf('```'))
+  }
+  s = s.trim()
+
+  // Extract just the JSON object/array — handles:
+  // - Trailing explanatory text after JSON: {"foo":"bar"} This is because...
+  // - Leading prose before JSON: Looking at this post, {"foo":"bar"}
+  // - Both combined
+  // Find the first { or [ anywhere in the string and match its closing bracket
+  const jsonStart = findFirstJsonChar(s)
+  if (jsonStart >= 0) {
+    const startChar = s.charAt(jsonStart)
+    const closeChar = startChar === '{' ? '}' : ']'
+    let depth = 0
+    let inString = false
+    let escape = false
+    for (let i = jsonStart; i < s.length; i++) {
+      const c = s.charAt(i)
+      if (escape) { escape = false; continue }
+      if (c === '\\' && inString) { escape = true; continue }
+      if (c === '"' && !escape) { inString = !inString; continue }
+      if (inString) continue
+      if (c === startChar) depth++
+      else if (c === closeChar) {
+        depth--
+        if (depth === 0) {
+          return s.slice(jsonStart, i + 1)
+        }
+      }
+    }
+  }
+
+  return s
+}
+
+function findFirstJsonChar(s: string): number {
+  for (let i = 0; i < s.length; i++) {
+    if (s.charAt(i) === '{' || s.charAt(i) === '[') return i
+  }
+  return -1
+}
+
 // --- Claude Provider ---
 
 export class ClaudeProvider implements LLMProvider {
@@ -392,7 +449,8 @@ export class GrokProvider implements LLMProvider {
       model: this.defaultModel,
       messages: messages as any,
       temperature: request.temperature,
-      max_tokens: request.max_tokens ?? 1024
+      max_tokens: request.max_tokens ?? 1024,
+      response_format: request.json_mode ? { type: 'json_object' } : undefined
     })
 
     const choice = response.choices[0]

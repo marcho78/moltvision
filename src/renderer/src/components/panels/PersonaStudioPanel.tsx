@@ -80,30 +80,54 @@ function EngagementRulesEditor({ rules, onChange }: { rules: EngagementRules; on
   return (
     <div className="space-y-3">
       <h4 className="text-sm font-medium">Engagement Rules</h4>
+
+      {/* Moltbook API limits info box */}
+      <div className="bg-molt-bg border border-molt-border rounded-lg p-2.5 space-y-1">
+        <div className="text-[10px] text-molt-muted uppercase tracking-wider font-semibold mb-1">Moltbook API Limits</div>
+        <div className="grid grid-cols-3 gap-2 text-[11px]">
+          <div className="text-molt-text">
+            <span className="text-molt-muted">Posts: </span>1 per 30 min
+          </div>
+          <div className="text-molt-text">
+            <span className="text-molt-muted">Comments: </span>1 per 20 sec
+          </div>
+          <div className="text-molt-text">
+            <span className="text-molt-muted">Daily cap: </span>50 comments/day
+          </div>
+        </div>
+        <p className="text-[10px] text-molt-muted">
+          Your persona limits below are capped to these API maximums. The agent enforces whichever is lower.
+        </p>
+      </div>
+
       <div className="grid grid-cols-2 gap-3">
         <div>
           <label className="text-xs text-molt-muted">Engagement Rate: {(rules.engagement_rate * 100).toFixed(0)}%</label>
           <input type="range" min="0" max="1" step="0.05" value={rules.engagement_rate}
             onChange={(e) => onChange({ ...rules, engagement_rate: parseFloat(e.target.value) })}
             className="w-full" />
+          <p className="text-[10px] text-molt-muted">Probability of evaluating each eligible post</p>
         </div>
         <div>
           <label className="text-xs text-molt-muted">Min Karma: {rules.min_karma_threshold}</label>
           <input type="range" min="-100" max="100" step="1" value={rules.min_karma_threshold}
             onChange={(e) => onChange({ ...rules, min_karma_threshold: parseInt(e.target.value) })}
             className="w-full" />
+          <p className="text-[10px] text-molt-muted">Skip posts below this karma score</p>
         </div>
         <div>
           <label className="text-xs text-molt-muted">Max Posts/Hour: {rules.max_posts_per_hour}</label>
-          <input type="range" min="0" max="10" step="1" value={rules.max_posts_per_hour}
+          <input type="range" min="0" max="2" step="1" value={Math.min(rules.max_posts_per_hour, 2)}
             onChange={(e) => onChange({ ...rules, max_posts_per_hour: parseInt(e.target.value) })}
             className="w-full" />
+          <p className="text-[10px] text-molt-muted">API max: 2/hour (1 per 30 min)</p>
         </div>
         <div>
           <label className="text-xs text-molt-muted">Max Comments/Hour: {rules.max_comments_per_hour}</label>
-          <input type="range" min="0" max="30" step="1" value={rules.max_comments_per_hour}
+          <input type="range" min="0" max="10" step="1" value={Math.min(rules.max_comments_per_hour, 10)}
             onChange={(e) => onChange({ ...rules, max_comments_per_hour: parseInt(e.target.value) })}
             className="w-full" />
+          <p className="text-[10px] text-molt-muted">API max: 50/day, 1 per 20 sec cooldown</p>
         </div>
       </div>
       <div className="flex gap-4">

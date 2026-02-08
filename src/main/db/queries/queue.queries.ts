@@ -65,3 +65,8 @@ export function countActionsTodayTotal(): number {
   )
   return row?.cnt ?? 0
 }
+
+export function clearCompletedActions(): number {
+  const result = run("DELETE FROM action_queue WHERE status IN ('completed', 'failed', 'rejected')")
+  return result.changes
+}
