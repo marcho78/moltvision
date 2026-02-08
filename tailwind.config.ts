@@ -7,17 +7,17 @@ export default {
     extend: {
       colors: {
         molt: {
-          bg: '#0f0f13',
-          surface: '#1a1a24',
-          border: '#2a2a3a',
-          text: '#e0e0e8',
-          muted: '#8888a0',
-          accent: '#7c5cfc',
-          'accent-hover': '#9b7eff',
-          success: '#22c55e',
-          warning: '#eab308',
-          error: '#ef4444',
-          info: '#3b82f6'
+          bg: 'rgb(var(--molt-bg) / <alpha-value>)',
+          surface: 'rgb(var(--molt-surface) / <alpha-value>)',
+          border: 'rgb(var(--molt-border) / <alpha-value>)',
+          text: 'rgb(var(--molt-text) / <alpha-value>)',
+          muted: 'rgb(var(--molt-muted) / <alpha-value>)',
+          accent: 'rgb(var(--molt-accent) / <alpha-value>)',
+          'accent-hover': 'rgb(var(--molt-accent-hover) / <alpha-value>)',
+          success: 'rgb(var(--molt-success) / <alpha-value>)',
+          warning: 'rgb(var(--molt-warning) / <alpha-value>)',
+          error: 'rgb(var(--molt-error) / <alpha-value>)',
+          info: 'rgb(var(--molt-info) / <alpha-value>)'
         }
       },
       fontFamily: {

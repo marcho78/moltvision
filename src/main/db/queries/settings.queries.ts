@@ -3,6 +3,10 @@ import type { LLMProviderName, UserPreferences } from '../../../shared/domain.ty
 
 export function getPreferences(): UserPreferences {
   const row = queryOne<any>('SELECT * FROM user_preferences WHERE id = 1')
+  let themeCustomColors = null
+  if (row?.theme_custom_colors) {
+    try { themeCustomColors = JSON.parse(row.theme_custom_colors) } catch { /* ignore */ }
+  }
   return {
     active_llm: row?.active_llm ?? 'claude',
     fallback_llm: row?.fallback_llm ?? null,
@@ -12,7 +16,9 @@ export function getPreferences(): UserPreferences {
     heartbeat_interval: row?.heartbeat_interval ?? 15000,
     llm_temperature: row?.llm_temperature ?? 0.7,
     max_tokens: row?.max_tokens ?? 1024,
-    active_persona_id: row?.active_persona_id ?? 'default'
+    active_persona_id: row?.active_persona_id ?? 'default',
+    suppress_sync_prompt: !!(row?.suppress_sync_prompt),
+    theme_custom_colors: themeCustomColors
   }
 }
 
@@ -23,12 +29,14 @@ export function savePreferences(prefs: Partial<UserPreferences>): void {
     `UPDATE user_preferences SET
       active_llm = ?, fallback_llm = ?, panel_layout = ?, theme = ?,
       operation_mode = ?, heartbeat_interval = ?, llm_temperature = ?, max_tokens = ?,
-      active_persona_id = ?
+      active_persona_id = ?, suppress_sync_prompt = ?, theme_custom_colors = ?
     WHERE id = 1`,
     [
       merged.active_llm, merged.fallback_llm, JSON.stringify(merged.panel_layout),
       merged.theme, merged.operation_mode, merged.heartbeat_interval,
-      merged.llm_temperature, merged.max_tokens, merged.active_persona_id
+      merged.llm_temperature, merged.max_tokens, merged.active_persona_id,
+      merged.suppress_sync_prompt ? 1 : 0,
+      merged.theme_custom_colors ? JSON.stringify(merged.theme_custom_colors) : null
     ]
   )
 }

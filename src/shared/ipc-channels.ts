@@ -76,26 +76,22 @@ export const IPC = {
   ANALYTICS_KARMA_HISTORY: 'analytics:karma-history',
   ANALYTICS_ACTIVITY: 'analytics:activity',
   ANALYTICS_STATS: 'analytics:stats',
+  ANALYTICS_TOKEN_USAGE: 'analytics:token-usage',
 
   // Persona
   PERSONA_SAVE: 'persona:save',
   PERSONA_LIST: 'persona:list',
   PERSONA_DELETE: 'persona:delete',
   PERSONA_GENERATE_PREVIEW: 'persona:generate-preview',
+  PERSONA_TEST_DECISIONS: 'persona:test-decisions',
 
   // Settings
   SETTINGS_SAVE_API_KEY: 'settings:save-api-key',
+  SETTINGS_SAVE_PREFERENCES: 'settings:save-preferences',
   SETTINGS_TEST_CONNECTION: 'settings:test-connection',
   SETTINGS_GET_ALL: 'settings:get-all',
   SETTINGS_EXPORT: 'settings:export',
   SETTINGS_CLEAR_CACHE: 'settings:clear-cache',
-
-  // Bonus
-  BONUS_MOOD: 'bonus:mood',
-  BONUS_TRENDS: 'bonus:trends',
-  BONUS_RIVALRIES: 'bonus:rivalries',
-  BONUS_FORECAST: 'bonus:forecast',
-  BONUS_IDEAS: 'bonus:ideas',
 
   // Push events
   API_RATE_LIMIT_UPDATE: 'api:rate-limit-update'

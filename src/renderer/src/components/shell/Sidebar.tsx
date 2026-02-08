@@ -23,8 +23,7 @@ const ITEMS_AFTER: SidebarItemDef[] = [
   { id: 'analytics', label: 'Analytics', icon: '📊' },
   { id: 'autopilot', label: 'Autopilot', icon: '🤖' },
   { id: 'moderation', label: 'Moderation', icon: '🛡' },
-  { id: 'settings', label: 'Settings', icon: '⚙' },
-  { id: 'bonus', label: 'Bonus', icon: '✨' }
+  { id: 'settings', label: 'Settings', icon: '⚙' }
 ]
 
 export function Sidebar() {
@@ -59,6 +58,7 @@ export function Sidebar() {
             is_subscribed: s.is_subscribed ?? false,
             moderators: s.moderators ?? [],
             rules: s.rules ?? [],
+            your_role: s.your_role ?? null,
             created_at: s.created_at ?? ''
           }))
           setSubmolts(normalized)

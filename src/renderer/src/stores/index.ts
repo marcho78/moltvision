@@ -4,21 +4,23 @@ import type {
   AgentPersona, AutopilotStatus, ChatResponse, KarmaSnapshot,
   ActivityLogEntry, RateLimitState, GalaxyNode, GalaxyEdge,
   NetworkNode, NetworkEdge, SearchResult, SearchCluster,
-  UserPreferences, ApiKeyStatus, MoodData, TrendItem,
-  Rivalry, KarmaForecast, PostIdea, SortOrder, FeedSource, OperationMode,
-  LLMProviderName, VoteDirection, AgentEngagement, ReplyInboxEntry
+  UserPreferences, ApiKeyStatus, SortOrder, FeedSource, OperationMode,
+  LLMProviderName, VoteDirection, AgentEngagement, ReplyInboxEntry,
+  ThemePresetId, ThemeColors
 } from '@shared/domain.types'
 
 // --- UI Slice ---
 interface UISlice {
   activePanel: PanelId
   sidebarCollapsed: boolean
-  theme: 'dark' | 'light'
+  theme: ThemePresetId | 'custom'
+  themeCustomColors: ThemeColors | null
   commandPaletteOpen: boolean
   notifications: Array<{ id: string; message: string; type: 'info' | 'success' | 'warning' | 'error'; timestamp: number }>
   setActivePanel: (panel: PanelId) => void
   toggleSidebar: () => void
-  setTheme: (theme: 'dark' | 'light') => void
+  setTheme: (theme: ThemePresetId | 'custom') => void
+  setThemeCustomColors: (colors: ThemeColors | null) => void
   toggleCommandPalette: () => void
   addNotification: (message: string, type?: 'info' | 'success' | 'warning' | 'error') => void
   dismissNotification: (id: string) => void
@@ -58,14 +60,23 @@ interface AgentsSlice {
 }
 
 // --- Submolts Slice ---
+interface SyncStatus {
+  syncing: boolean
+  cached: number
+  total: number
+  phase: string
+}
+
 interface SubmoltsSlice {
   submolts: Submolt[]
   galaxyNodes: GalaxyNode[]
   galaxyEdges: GalaxyEdge[]
   selectedSubmoltDetail: Submolt | null
+  syncStatus: SyncStatus
   setSubmolts: (submolts: Submolt[]) => void
   setGalaxyData: (nodes: GalaxyNode[], edges: GalaxyEdge[]) => void
   setSelectedSubmoltDetail: (submolt: Submolt | null) => void
+  setSyncStatus: (status: SyncStatus) => void
 }
 
 // --- Conversation Slice ---
@@ -174,35 +185,23 @@ interface SettingsSlice {
   setPreferences: (prefs: UserPreferences) => void
 }
 
-// --- Bonus Slice ---
-interface BonusSlice {
-  moodData: MoodData | null
-  trends: TrendItem[]
-  rivalries: Rivalry[]
-  karmaForecast: KarmaForecast | null
-  postIdeas: PostIdea[]
-  setMoodData: (mood: MoodData) => void
-  setTrends: (trends: TrendItem[]) => void
-  setRivalries: (rivalries: Rivalry[]) => void
-  setKarmaForecast: (forecast: KarmaForecast) => void
-  setPostIdeas: (ideas: PostIdea[]) => void
-}
-
 // --- Combined Store ---
 export type AppState = UISlice & FeedSlice & AgentsSlice & SubmoltsSlice &
   ConversationSlice & PersonaSlice & SearchSlice & AnalyticsSlice &
-  AutopilotSlice & ModerationSlice & SettingsSlice & BonusSlice
+  AutopilotSlice & ModerationSlice & SettingsSlice
 
 export const useStore = create<AppState>((set) => ({
   // --- UI ---
   activePanel: 'feed',
   sidebarCollapsed: false,
   theme: 'dark',
+  themeCustomColors: null,
   commandPaletteOpen: false,
   notifications: [],
   setActivePanel: (panel) => set({ activePanel: panel }),
   toggleSidebar: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
   setTheme: (theme) => set({ theme }),
+  setThemeCustomColors: (themeCustomColors) => set({ themeCustomColors }),
   toggleCommandPalette: () => set((s) => ({ commandPaletteOpen: !s.commandPaletteOpen })),
   addNotification: (message, type = 'info') =>
     set((s) => ({
@@ -255,9 +254,11 @@ export const useStore = create<AppState>((set) => ({
   galaxyNodes: [],
   galaxyEdges: [],
   selectedSubmoltDetail: null,
+  syncStatus: { syncing: false, cached: 0, total: 0, phase: '' },
   setSubmolts: (submolts) => set({ submolts }),
   setGalaxyData: (galaxyNodes, galaxyEdges) => set({ galaxyNodes, galaxyEdges }),
   setSelectedSubmoltDetail: (submolt) => set({ selectedSubmoltDetail: submolt }),
+  setSyncStatus: (syncStatus) => set({ syncStatus }),
 
   // --- Conversation ---
   activePostId: null,
@@ -342,17 +343,10 @@ export const useStore = create<AppState>((set) => ({
   setActiveLlm: (activeLlm) => set({ activeLlm }),
   setConnectionStatus: (provider, connected) =>
     set((s) => ({ connectionStatuses: { ...s.connectionStatuses, [provider]: connected } })),
-  setPreferences: (preferences) => set({ preferences }),
+  setPreferences: (preferences) => set({
+    preferences,
+    theme: preferences.theme,
+    themeCustomColors: preferences.theme_custom_colors ?? null
+  }),
 
-  // --- Bonus ---
-  moodData: null,
-  trends: [],
-  rivalries: [],
-  karmaForecast: null,
-  postIdeas: [],
-  setMoodData: (moodData) => set({ moodData }),
-  setTrends: (trends) => set({ trends }),
-  setRivalries: (rivalries) => set({ rivalries }),
-  setKarmaForecast: (karmaForecast) => set({ karmaForecast }),
-  setPostIdeas: (postIdeas) => set({ postIdeas })
 }))

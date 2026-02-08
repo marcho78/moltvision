@@ -18,9 +18,9 @@ const ALLOWED_CHANNELS = new Set([
   'autopilot:get-replies', 'autopilot:mark-replies-read',
   'autopilot:reject-all', 'autopilot:clear-queue',
   'search:execute', 'search:get-clusters',
-  'analytics:karma-history', 'analytics:activity', 'analytics:stats',
-  'persona:save', 'persona:list', 'persona:delete', 'persona:generate-preview',
-  'settings:save-api-key', 'settings:test-connection', 'settings:get-all',
+  'analytics:karma-history', 'analytics:activity', 'analytics:stats', 'analytics:token-usage',
+  'persona:save', 'persona:list', 'persona:delete', 'persona:generate-preview', 'persona:test-decisions',
+  'settings:save-api-key', 'settings:save-preferences', 'settings:test-connection', 'settings:get-all',
   'settings:export', 'settings:clear-cache',
   'bonus:mood', 'bonus:trends', 'bonus:rivalries', 'bonus:forecast', 'bonus:ideas'
 ])

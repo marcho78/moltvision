@@ -1,7 +1,7 @@
 import { ipcMain } from 'electron'
 import { IPC } from '../../shared/ipc-channels'
-import { getPreferences } from '../db/queries/settings.queries'
-import { getKarmaHistory, getActivityLog, getActivityStats } from '../db/queries/analytics.queries'
+import { getPreferences, savePreferences } from '../db/queries/settings.queries'
+import { getKarmaHistory, getActivityLog, getActivityStats, getTokenUsageStats } from '../db/queries/analytics.queries'
 import { getAllRateLimits } from '../db/queries/rate-limits.queries'
 import { queryAll, queryOne, run } from '../db/index'
 import { llmManager } from '../services/llm.service'
@@ -21,6 +21,10 @@ export function registerDbHandlers(): void {
     const stats = getActivityStats()
     const rateLimits = getAllRateLimits()
     return { ...stats, rate_limits: rateLimits }
+  })
+
+  ipcMain.handle(IPC.ANALYTICS_TOKEN_USAGE, async () => {
+    return getTokenUsageStats()
   })
 
   // --- Persona ---
@@ -69,7 +73,8 @@ export function registerDbHandlers(): void {
         ],
         temperature: persona.tone_settings?.temperature ?? 0.7,
         max_tokens: persona.tone_settings?.max_length ?? 500,
-        provider: provider ?? persona.llm_provider ?? undefined
+        provider: provider ?? persona.llm_provider ?? undefined,
+        purpose: 'persona_preview'
       })
       return { preview_response: response.content, provider_used: response.provider, tone_analysis: `Style: ${persona.tone_settings?.style}` }
     } catch (err: any) {
@@ -77,7 +82,128 @@ export function registerDbHandlers(): void {
     }
   })
 
+  // --- Persona Test: runs LLM through all decision paths with a sample post ---
+  ipcMain.handle(IPC.PERSONA_TEST_DECISIONS, async (_e, payload) => {
+    const { persona, sample_post } = payload
+    const provider = persona.llm_provider ?? 'claude'
+    const rules = persona.engagement_rules ?? {}
+    const postStrategy = rules.post_strategy ?? { gap_detection: false, momentum_based: false, quality_gate: 5, let_llm_decide: true }
+    const commentStrategy = rules.comment_strategy ?? { early_voice: false, join_popular: false, domain_expertise: true, ask_questions: false, freshness_hours: 0, let_llm_decide: true }
+
+    const results: Array<{ test: string; status: 'pass' | 'fail' | 'error'; response: string; latency_ms: number }> = []
+
+    // Helper to run one test
+    const runTest = async (testName: string, systemPrompt: string, userPrompt: string): Promise<void> => {
+      const start = Date.now()
+      try {
+        const response = await llmManager.chat({
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: userPrompt }
+          ],
+          temperature: 0.3,
+          max_tokens: 500,
+          json_mode: true,
+          provider,
+          purpose: 'persona_test'
+        })
+        const latency = Date.now() - start
+        const content = response.content
+        results.push({ test: testName, status: 'pass', response: content, latency_ms: latency })
+      } catch (err: any) {
+        results.push({ test: testName, status: 'error', response: err.message ?? 'Unknown error', latency_ms: Date.now() - start })
+      }
+    }
+
+    // Build strategy descriptions for display
+    const commentCriteria: string[] = []
+    if (commentStrategy.let_llm_decide) commentCriteria.push('LLM has full autonomy')
+    if (commentStrategy.early_voice) commentCriteria.push('Prefer low-comment posts')
+    if (commentStrategy.join_popular) commentCriteria.push('Prefer high-karma posts')
+    if (commentStrategy.domain_expertise) commentCriteria.push('Match interest tags')
+    if (commentStrategy.ask_questions) commentCriteria.push('Ask questions')
+
+    const postCriteria: string[] = []
+    if (postStrategy.let_llm_decide) postCriteria.push('LLM has full autonomy')
+    if (postStrategy.gap_detection) postCriteria.push('Gap detection')
+    if (postStrategy.momentum_based) postCriteria.push('Momentum-based')
+    postCriteria.push(`Quality gate: ${postStrategy.quality_gate}/10`)
+
+    const controversialClause = rules.avoid_controversial
+      ? '\nIMPORTANT: AVOID controversial topics. If this post is controversial, verdict MUST be "skip".'
+      : ''
+
+    // Build comment strategy prompt
+    let commentStrategyClause = ''
+    if (commentStrategy.let_llm_decide) {
+      commentStrategyClause = '\nYou have full autonomy to decide whether and how to engage. Think step by step about WHY you would or would not engage. Explain your complete reasoning.'
+    } else {
+      const lines: string[] = []
+      if (commentStrategy.early_voice) lines.push(`- PREFER posts with few comments (this post has ${sample_post.comment_count ?? 3}) — be an early voice`)
+      if (commentStrategy.join_popular) lines.push(`- PREFER high-karma posts (this post has ${sample_post.karma ?? 15} karma) — join popular conversations`)
+      if (commentStrategy.domain_expertise) lines.push('- ONLY comment when the topic clearly matches your interest areas')
+      if (commentStrategy.ask_questions) lines.push('- PREFER asking thoughtful questions over stating opinions')
+      if (commentStrategy.freshness_hours > 0) lines.push(`- SKIP posts older than ${commentStrategy.freshness_hours} hours`)
+      commentStrategyClause = lines.length > 0
+        ? `\n\nComment strategy:\n${lines.join('\n')}\n\nThink step by step. Explain your complete reasoning.`
+        : '\nUse your best judgment. Think step by step.'
+    }
+
+    // Test 1: Comment Evaluation
+    await runTest(
+      'Comment Evaluation',
+      `${persona.system_prompt}\n\nYou are evaluating whether to engage with this post on Moltbook (an AI social network). Your interests: ${(persona.interest_tags ?? []).join(', ') || 'general'}. Your style: ${persona.tone_settings?.style ?? 'friendly'}.${controversialClause}${commentStrategyClause}\n\nRespond with JSON only: {"verdict":"engage"|"skip","reasoning":"<your detailed step-by-step thinking>","action":"comment"|"upvote"|"downvote","priority":0-10}`,
+      `Post in m/${sample_post.submolt ?? 'general'}:\nTitle: ${sample_post.title}\nContent: ${sample_post.content}\nKarma: ${sample_post.karma ?? 15}\nComments: ${sample_post.comment_count ?? 3}`
+    )
+
+    // Test 2: Comment Generation (if evaluation passed)
+    await runTest(
+      'Comment Generation',
+      `${persona.system_prompt}\n\nYou are writing a comment on Moltbook in the style: ${persona.tone_settings?.style ?? 'friendly'}. Write a short, punchy comment — 1-2 complete sentences.\n\nRespond with JSON only: {"content":"your comment text"}`,
+      `Write a response to:\nTitle: ${sample_post.title}\nContent: ${sample_post.content}`
+    )
+
+    // Test 3: Post Creation Decision
+    const topSubmolts = Object.entries(persona.submolt_priorities ?? {}).slice(0, 3).map(([name, p]) => `m/${name} (priority: ${p})`)
+    let postStrategyClause = ''
+    if (postStrategy.let_llm_decide) {
+      postStrategyClause = '\nYou have full autonomy to decide. Think step by step. Explain your reasoning.'
+    } else {
+      const lines: string[] = []
+      if (postStrategy.gap_detection) lines.push('- ONLY post when you notice a topic gap')
+      if (postStrategy.momentum_based) lines.push('- Consider your recent performance')
+      postStrategyClause = lines.length > 0
+        ? `\n\nPost strategy:\n${lines.join('\n')}\nQuality gate: self-score 0-10, only proceed if >= ${postStrategy.quality_gate}.\nThink step by step.`
+        : '\nUse your best judgment. Think step by step.'
+    }
+
+    await runTest(
+      'Post Creation Decision',
+      `${persona.system_prompt}\n\nYou are considering creating an original post on Moltbook. Your interests: ${(persona.interest_tags ?? []).join(', ') || 'general'}. Your style: ${persona.tone_settings?.style ?? 'friendly'}.\n\nYour active submolts:\n${topSubmolts.length > 0 ? topSubmolts.join('\n') : '(none configured)'}\n\nDecide if you have something worth posting.${postStrategyClause}\n\nRespond JSON only: {"should_post":true|false,"quality_score":0-10,"submolt":"submolt_name","title":"post title","content":"post body","reasoning":"<your detailed step-by-step thinking>"}`,
+      'Consider creating an original post. Think about your interests and what would be valuable to the community.'
+    )
+
+    // Test 4: Reply Evaluation
+    await runTest(
+      'Reply Evaluation',
+      `${persona.system_prompt}\n\nSomeone replied to your comment on Moltbook. Decide if it warrants a response. Think step by step.\n\nRespond JSON only: {"should_reply":true|false,"reasoning":"<your detailed thinking>"}`,
+      `Your original comment: "That's a fascinating perspective on emergent behavior in multi-agent systems."\nTheir reply: "Thanks! Do you think this could apply to economic markets too?"`
+    )
+
+    return {
+      results,
+      provider,
+      comment_strategy_active: commentCriteria,
+      post_strategy_active: postCriteria
+    }
+  })
+
   // --- Settings ---
+  ipcMain.handle(IPC.SETTINGS_SAVE_PREFERENCES, async (_e, payload) => {
+    savePreferences(payload)
+    return { success: true }
+  })
+
   ipcMain.handle(IPC.SETTINGS_GET_ALL, async () => {
     const preferences = getPreferences()
     const rows = queryAll<{ provider: string }>('SELECT provider FROM api_keys')
@@ -167,90 +293,4 @@ export function registerDbHandlers(): void {
     return { clusters, points }
   })
 
-  // --- Bonus Features ---
-  ipcMain.handle(IPC.BONUS_MOOD, async () => {
-    try {
-      const response = await llmManager.chat({
-        messages: [
-          { role: 'system', content: 'Analyze community mood. Respond with JSON: {"overall":0.5,"by_submolt":{},"trend":"stable"}' },
-          { role: 'user', content: 'Generate a sample community mood analysis for a social network.' }
-        ],
-        temperature: 0.5,
-        max_tokens: 200,
-        json_mode: true
-      })
-      const mood = JSON.parse(response.content)
-      return { mood: { ...mood, timestamp: new Date().toISOString() } }
-    } catch {
-      return { mood: { overall: 0.5, by_submolt: {}, trend: 'stable', timestamp: new Date().toISOString() } }
-    }
-  })
-
-  ipcMain.handle(IPC.BONUS_TRENDS, async () => {
-    try {
-      const response = await llmManager.chat({
-        messages: [
-          { role: 'system', content: 'Generate trending topics. Respond with JSON: {"trends":[{"topic":"...","submolts":["..."],"post_count":10,"velocity":1.5,"sparkline":[1,2,3,4,5]}]}' },
-          { role: 'user', content: 'Generate sample trending topics for an AI social network.' }
-        ],
-        temperature: 0.7,
-        max_tokens: 500,
-        json_mode: true
-      })
-      return JSON.parse(response.content)
-    } catch {
-      return { trends: [] }
-    }
-  })
-
-  ipcMain.handle(IPC.BONUS_RIVALRIES, async () => {
-    try {
-      const response = await llmManager.chat({
-        messages: [
-          { role: 'system', content: 'Generate agent rivalries. Respond with JSON: {"rivalries":[{"agent_a":"...","agent_b":"...","disagreement_count":5,"topics":["..."],"intensity":0.7,"history":[]}]}' },
-          { role: 'user', content: 'Generate sample agent rivalries for an AI social network.' }
-        ],
-        temperature: 0.7,
-        max_tokens: 400,
-        json_mode: true
-      })
-      return JSON.parse(response.content)
-    } catch {
-      return { rivalries: [] }
-    }
-  })
-
-  ipcMain.handle(IPC.BONUS_FORECAST, async () => {
-    try {
-      const response = await llmManager.chat({
-        messages: [
-          { role: 'system', content: 'Generate karma forecast. Respond with JSON: {"forecast":{"current":100,"projected_7d":120,"projected_30d":200,"trend_line":[{"date":"2026-01-01","value":100}],"analysis":"..."}}' },
-          { role: 'user', content: 'Generate a sample karma forecast.' }
-        ],
-        temperature: 0.5,
-        max_tokens: 500,
-        json_mode: true
-      })
-      return JSON.parse(response.content)
-    } catch {
-      return { forecast: { current: 0, projected_7d: 0, projected_30d: 0, trend_line: [], analysis: '' } }
-    }
-  })
-
-  ipcMain.handle(IPC.BONUS_IDEAS, async () => {
-    try {
-      const response = await llmManager.chat({
-        messages: [
-          { role: 'system', content: 'Generate post ideas. Respond with JSON: {"ideas":[{"id":"1","submolt":"general","title":"...","content_outline":"...","reasoning":"...","estimated_karma":50}]}' },
-          { role: 'user', content: 'Generate 3 creative post ideas for an AI social network.' }
-        ],
-        temperature: 0.9,
-        max_tokens: 600,
-        json_mode: true
-      })
-      return JSON.parse(response.content)
-    } catch {
-      return { ideas: [] }
-    }
-  })
 }

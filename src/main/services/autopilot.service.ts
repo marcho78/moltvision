@@ -1,10 +1,10 @@
 import { EventEmitter } from 'events'
 import log from 'electron-log'
-import type { OperationMode, ActionPayload, AutopilotStatus, AgentPersona, EngagementRules } from '../../shared/domain.types'
+import type { OperationMode, ActionPayload, AutopilotStatus, AgentPersona, EngagementRules, PostStrategy, CommentStrategy } from '../../shared/domain.types'
 import { llmManager, cleanJsonResponse } from './llm.service'
 import { moltbookClient } from './moltbook-api.service'
 import { enqueueAction, getNextApproved, updateActionStatus, rejectAllPending, countActionsInPeriod, countActionsTodayTotal } from '../db/queries/queue.queries'
-import { logActivity } from '../db/queries/analytics.queries'
+import { logActivity, recordKarmaSnapshot, recordPostPerformance } from '../db/queries/analytics.queries'
 import { queryOne, run } from '../db/index'
 import {
   recordEngagement, hasEngaged, countEngagementsInPeriod, countRepliesInThread,
@@ -135,7 +135,11 @@ export class AutopilotService extends EventEmitter {
         engagement_rules: {
           engagement_rate: 0.3, min_karma_threshold: 0, reply_to_replies: true,
           avoid_controversial: false, max_posts_per_hour: 2, max_comments_per_hour: 10,
-          max_reply_depth: 3, max_replies_per_thread: 2
+          max_reply_depth: 3, max_replies_per_thread: 2,
+          activity_profile: 'custom',
+          post_strategy: { gap_detection: false, momentum_based: false, quality_gate: 5, let_llm_decide: true },
+          comment_strategy: { early_voice: false, join_popular: false, domain_expertise: true, ask_questions: false, freshness_hours: 0, let_llm_decide: true },
+          daily_post_budget: 4, daily_comment_budget: 30
         },
         submolt_priorities: {},
         system_prompt: 'You are a helpful and engaging AI agent participating in Moltbook discussions.',
@@ -148,7 +152,14 @@ export class AutopilotService extends EventEmitter {
       ...row,
       tone_settings: JSON.parse(row.tone_settings),
       interest_tags: JSON.parse(row.interest_tags),
-      engagement_rules: { max_reply_depth: 3, max_replies_per_thread: 2, ...JSON.parse(row.engagement_rules) },
+      engagement_rules: {
+        max_reply_depth: 3, max_replies_per_thread: 2,
+        activity_profile: 'custom',
+        post_strategy: { gap_detection: false, momentum_based: false, quality_gate: 5, let_llm_decide: true },
+        comment_strategy: { early_voice: false, join_popular: false, domain_expertise: true, ask_questions: false, freshness_hours: 0, let_llm_decide: true },
+        daily_post_budget: 4, daily_comment_budget: 30,
+        ...JSON.parse(row.engagement_rules)
+      },
       submolt_priorities: JSON.parse(row.submolt_priorities),
       llm_provider: row.llm_provider ?? 'claude'
     }
@@ -261,6 +272,14 @@ export class AutopilotService extends EventEmitter {
         }
       }
 
+      // --- Check daily budgets ---
+      const dailyCommentBudget = rules.daily_comment_budget ?? 30
+      const commentsToday = countEngagementsInPeriod(24, 'create_comment') + countEngagementsInPeriod(24, 'reply')
+      if (commentsToday >= dailyCommentBudget) {
+        log.info(`Daily comment budget exhausted (${commentsToday}/${dailyCommentBudget})`)
+        this.emit('scan:progress', { phase: 'done', message: `Daily comment budget reached (${commentsToday}/${dailyCommentBudget})` })
+      }
+
       // --- Filter out already-engaged posts ---
       const candidatePosts = allPosts.filter(p => !hasEngaged(p.id))
 
@@ -268,7 +287,18 @@ export class AutopilotService extends EventEmitter {
       const filteredPosts = candidatePosts.filter(() => Math.random() < rules.engagement_rate)
 
       // --- Apply min_karma_threshold ---
-      const eligiblePosts = filteredPosts.filter(p => (p.karma ?? 0) >= rules.min_karma_threshold)
+      let eligiblePosts = filteredPosts.filter(p => (p.karma ?? 0) >= rules.min_karma_threshold)
+
+      // --- Apply freshness filter from comment strategy ---
+      const commentStrategy = rules.comment_strategy as CommentStrategy | undefined
+      const freshnessHours = commentStrategy?.freshness_hours ?? 0
+      if (freshnessHours > 0) {
+        const cutoff = Date.now() - freshnessHours * 3600000
+        eligiblePosts = eligiblePosts.filter(p => {
+          if (!p.created_at) return true // No timestamp — don't filter
+          return new Date(p.created_at).getTime() > cutoff
+        })
+      }
 
       log.info(`Scan found ${allPosts.length} posts, ${candidatePosts.length} new, ${eligiblePosts.length} eligible after filters`)
       this.emit('scan:progress', { phase: 'evaluate', message: `Found ${allPosts.length} posts, ${eligiblePosts.length} eligible — evaluating...` })
@@ -364,6 +394,9 @@ export class AutopilotService extends EventEmitter {
         await this.checkForReplies(persona)
       }
 
+      // --- Analytics heartbeat: snapshot karma + track own post performance ---
+      await this.recordAnalyticsHeartbeat()
+
       this.emit('scan:progress', { phase: 'done', message: 'Scan cycle complete' })
       this.emit('cycle:end')
     } catch (err) {
@@ -377,19 +410,52 @@ export class AutopilotService extends EventEmitter {
     }
   }
 
+  // --- Strategy Context Builder ---
+
+  private buildCommentStrategyPrompt(cs: CommentStrategy, post: any): string {
+    if (cs.let_llm_decide) {
+      return '\nYou have full autonomy to decide whether and how to engage. Think step by step about WHY you would or would not engage. Explain your complete reasoning.'
+    }
+    const criteria: string[] = []
+    if (cs.early_voice) criteria.push(`- PREFER posts with few comments (this post has ${post.comment_count ?? 0}) — be an early voice in the conversation`)
+    if (cs.join_popular) criteria.push(`- PREFER high-karma posts (this post has ${post.karma ?? 0} karma) — join popular conversations for visibility`)
+    if (cs.domain_expertise) criteria.push('- ONLY comment when the topic clearly matches your interest areas and you have something substantive to add')
+    if (cs.ask_questions) criteria.push('- PREFER asking thoughtful questions over stating opinions — show curiosity')
+    if (cs.freshness_hours > 0) criteria.push(`- SKIP posts older than ${cs.freshness_hours} hours`)
+    if (criteria.length === 0) criteria.push('- Use your best judgment about whether to engage')
+    return `\n\nComment strategy — follow these rules:\n${criteria.join('\n')}\n\nThink step by step. Explain your complete reasoning for your decision.`
+  }
+
+  private buildPostStrategyPrompt(ps: PostStrategy): string {
+    if (ps.let_llm_decide) {
+      return '\nYou have full autonomy to decide whether to create a post. Think step by step about WHY you would or would not post. Explain your complete reasoning.'
+    }
+    const criteria: string[] = []
+    if (ps.gap_detection) criteria.push('- ONLY post when you notice a topic gap — no recent discussion exists on this topic in the submolt')
+    if (ps.momentum_based) criteria.push('- Consider your recent performance — post more if recent posts got good karma, hold back if they underperformed')
+    if (criteria.length === 0) criteria.push('- Use your best judgment about whether to create a post')
+    return `\n\nPost creation strategy — follow these rules:\n${criteria.join('\n')}\nQuality gate: rate your post idea 0-10. Only proceed if your self-score is ${ps.quality_gate} or higher.\n\nThink step by step. Explain your complete reasoning for your decision.`
+  }
+
   // --- Post Evaluation (persona-driven) ---
 
   private async evaluatePost(post: any, persona: AgentPersona): Promise<Evaluation | null> {
     try {
-      const controversialClause = persona.engagement_rules.avoid_controversial
+      const rules = persona.engagement_rules
+      const controversialClause = rules.avoid_controversial
         ? '\nIMPORTANT: AVOID controversial, heated, or politically sensitive topics. If this post is controversial, verdict MUST be "skip".'
         : ''
+
+      const strategyClause = this.buildCommentStrategyPrompt(
+        rules.comment_strategy ?? { early_voice: false, join_popular: false, domain_expertise: true, ask_questions: false, freshness_hours: 0, let_llm_decide: true },
+        post
+      )
 
       const response = await llmManager.chat({
         messages: [
           {
             role: 'system',
-            content: `${persona.system_prompt}\n\nYou are evaluating whether to engage with this post on Moltbook (an AI social network). Your interests: ${persona.interest_tags.join(', ') || 'general'}. Your style: ${persona.tone_settings.style}.${controversialClause}\n\nRespond with JSON only: {"verdict":"engage"|"skip","reasoning":"...","action":"comment"|"upvote"|"downvote","priority":0-10}`
+            content: `${persona.system_prompt}\n\nYou are evaluating whether to engage with this post on Moltbook (an AI social network). Your interests: ${persona.interest_tags.join(', ') || 'general'}. Your style: ${persona.tone_settings.style}.${controversialClause}${strategyClause}\n\nRespond with JSON only: {"verdict":"engage"|"skip","reasoning":"<your detailed step-by-step thinking>","action":"comment"|"upvote"|"downvote","priority":0-10}`
           },
           {
             role: 'user',
@@ -397,9 +463,10 @@ export class AutopilotService extends EventEmitter {
           }
         ],
         temperature: 0.3,
-        max_tokens: 200,
+        max_tokens: 400,
         json_mode: true,
-        provider: persona.llm_provider
+        provider: persona.llm_provider,
+        purpose: 'evaluation'
       })
       return JSON.parse(cleanJsonResponse(response.content)) as Evaluation
     } catch (err) {
@@ -433,7 +500,8 @@ export class AutopilotService extends EventEmitter {
         temperature: 0.3,
         max_tokens: 100,
         json_mode: true,
-        provider: persona.llm_provider
+        provider: persona.llm_provider,
+        purpose: 'reply_evaluation'
       })
       return JSON.parse(cleanJsonResponse(response.content))
     } catch (err) {
@@ -471,7 +539,8 @@ export class AutopilotService extends EventEmitter {
         temperature: persona.tone_settings.temperature,
         max_tokens: persona.tone_settings.max_length,
         json_mode: true,
-        provider: persona.llm_provider
+        provider: persona.llm_provider,
+        purpose: 'content_generation'
       })
 
       const plan = JSON.parse(cleanJsonResponse(response.content))
@@ -493,6 +562,14 @@ export class AutopilotService extends EventEmitter {
 
   private async considerCreatingPost(persona: AgentPersona, rules: EngagementRules): Promise<void> {
     if (this.emergencyStopped) return
+
+    // Check daily post budget
+    const postsToday = countEngagementsInPeriod(24, 'create_post')
+    const dailyBudget = rules.daily_post_budget ?? 4
+    if (postsToday >= dailyBudget) {
+      log.info(`Post creation skipped: daily budget exhausted (${postsToday}/${dailyBudget})`)
+      return
+    }
 
     // Check rate limits: Moltbook allows 1 post per 30 min
     const postsLast30Min = countEngagementsInPeriod(0.5, 'create_post') // 0.5 hours = 30 min
@@ -518,6 +595,9 @@ export class AutopilotService extends EventEmitter {
     // Engagement rate gate — same probability as commenting
     if (Math.random() >= rules.engagement_rate) return
 
+    const postStrategy: PostStrategy = rules.post_strategy ?? { gap_detection: false, momentum_based: false, quality_gate: 5, let_llm_decide: true }
+    const strategyClause = this.buildPostStrategyPrompt(postStrategy)
+
     try {
       // Ask LLM if agent should create an original post
       const topSubmolts = prioritySubmolts.slice(0, 5).map(([name, priority]) => `m/${name} (priority: ${priority})`)
@@ -525,7 +605,7 @@ export class AutopilotService extends EventEmitter {
         messages: [
           {
             role: 'system',
-            content: `${persona.system_prompt}\n\nYou are considering creating an original post on Moltbook (an AI social network). Your interests: ${persona.interest_tags.join(', ') || 'general'}. Your style: ${persona.tone_settings.style}.\n\nYour active submolts:\n${topSubmolts.join('\n')}\n\nDecide if you have something worth posting. Only post if you have a genuine, interesting thought — not filler content.\n\nRespond JSON only: {"should_post":true|false,"submolt":"submolt_name","title":"post title","content":"post body","reasoning":"why this is worth posting"}`
+            content: `${persona.system_prompt}\n\nYou are considering creating an original post on Moltbook (an AI social network). Your interests: ${persona.interest_tags.join(', ') || 'general'}. Your style: ${persona.tone_settings.style}.\n\nYour active submolts:\n${topSubmolts.join('\n')}\n\nDecide if you have something worth posting. Only post if you have a genuine, interesting thought — not filler content.${strategyClause}\n\nRespond JSON only: {"should_post":true|false,"quality_score":0-10,"submolt":"submolt_name","title":"post title","content":"post body","reasoning":"<your detailed step-by-step thinking>"}`
           },
           {
             role: 'user',
@@ -533,13 +613,25 @@ export class AutopilotService extends EventEmitter {
           }
         ],
         temperature: persona.tone_settings.temperature,
-        max_tokens: 600,
+        max_tokens: 800,
         json_mode: true,
-        provider: persona.llm_provider
+        provider: persona.llm_provider,
+        purpose: 'post_decision'
       })
 
       const plan = JSON.parse(cleanJsonResponse(response.content))
       if (!plan.should_post || !plan.submolt || !plan.title || !plan.content) return
+
+      // Quality gate check — LLM self-scored the idea
+      const qualityScore = plan.quality_score ?? 10
+      if (qualityScore < postStrategy.quality_gate) {
+        log.info(`Post creation skipped: quality score ${qualityScore} < gate ${postStrategy.quality_gate}`)
+        this.emit('scan:progress', {
+          phase: 'evaluated',
+          message: `Post idea skipped: quality ${qualityScore}/10 below gate ${postStrategy.quality_gate}/10 — ${(plan.reasoning ?? '').slice(0, 100)}`
+        })
+        return
+      }
 
       // Verify the target submolt is in our priorities
       const targetSubmolt = plan.submolt.replace(/^m\//, '')
@@ -740,7 +832,8 @@ export class AutopilotService extends EventEmitter {
         temperature: persona.tone_settings.temperature,
         max_tokens: 150,
         json_mode: true,
-        provider: persona.llm_provider
+        provider: persona.llm_provider,
+        purpose: 'reply_generation'
       })
 
       const plan = JSON.parse(cleanJsonResponse(response.content))
@@ -798,6 +891,46 @@ export class AutopilotService extends EventEmitter {
     this.abortController = new AbortController()
     log.info('Emergency stop reset')
     this.emit('emergency:reset')
+  }
+
+  // --- Analytics Heartbeat ---
+
+  private async recordAnalyticsHeartbeat(): Promise<void> {
+    try {
+      // 1. Snapshot karma from GET /agents/me (1 API call)
+      const profile = await moltbookClient.getMyProfile()
+      if (profile) {
+        recordKarmaSnapshot({
+          karma: profile.karma ?? 0,
+          post_karma: profile.post_karma ?? 0,
+          comment_karma: profile.comment_karma ?? 0,
+          follower_count: profile.follower_count ?? 0,
+          post_count: profile.post_count ?? 0
+        })
+      }
+
+      // 2. Track performance of agent's own recent posts (max 5 API calls)
+      const ownPostIds = getRecentAgentPostIds(72).slice(0, 5) // Last 3 days, max 5
+      for (const postId of ownPostIds) {
+        if (this.emergencyStopped) break
+        try {
+          const post = await moltbookClient.getPost(postId)
+          if (post) {
+            recordPostPerformance(
+              postId,
+              post.karma ?? (post.upvotes ?? 0) - (post.downvotes ?? 0),
+              post.comment_count ?? 0
+            )
+          }
+        } catch {
+          // Post may have been deleted — skip silently
+        }
+        await this.delay(100)
+      }
+    } catch (err) {
+      // Non-fatal: analytics heartbeat failure shouldn't break scan cycle
+      log.warn('Analytics heartbeat failed:', (err as Error).message)
+    }
   }
 
   private delay(ms: number): Promise<void> {

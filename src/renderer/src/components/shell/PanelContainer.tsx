@@ -59,7 +59,6 @@ const AnalyticsPanel = lazy(() => import('../panels/AnalyticsPanel').then(m => (
 const AutopilotPanel = lazy(() => import('../panels/AutopilotPanel').then(m => ({ default: m.AutopilotPanel })))
 const ModerationPanel = lazy(() => import('../panels/ModerationPanel').then(m => ({ default: m.ModerationPanel })))
 const SettingsPanel = lazy(() => import('../panels/SettingsPanel').then(m => ({ default: m.SettingsPanel })))
-const BonusPanel = lazy(() => import('../panels/BonusPanel').then(m => ({ default: m.BonusPanel })))
 
 const PANEL_MAP: Record<PanelId, React.LazyExoticComponent<React.ComponentType>> = {
   feed: LiveFeedPanel,
@@ -71,8 +70,7 @@ const PANEL_MAP: Record<PanelId, React.LazyExoticComponent<React.ComponentType>>
   analytics: AnalyticsPanel,
   autopilot: AutopilotPanel,
   moderation: ModerationPanel,
-  settings: SettingsPanel,
-  bonus: BonusPanel
+  settings: SettingsPanel
 }
 
 function PanelFallback() {

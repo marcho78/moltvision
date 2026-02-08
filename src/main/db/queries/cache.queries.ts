@@ -121,18 +121,21 @@ export function getAgentSubmoltEdges(): any[] {
 
 export function upsertSubmolt(submolt: any): void {
   run(
-    `INSERT INTO cached_submolts (id, name, display_name, description, theme_color, subscriber_count, post_count, is_subscribed, moderators, rules, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `INSERT INTO cached_submolts (id, name, display_name, description, theme_color, subscriber_count, post_count, is_subscribed, moderators, rules, your_role, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(id) DO UPDATE SET
        display_name=excluded.display_name, description=excluded.description,
        theme_color=excluded.theme_color, subscriber_count=excluded.subscriber_count,
        post_count=excluded.post_count,
-       moderators=excluded.moderators, rules=excluded.rules, cached_at=datetime('now')`,
+       moderators=excluded.moderators, rules=excluded.rules,
+       your_role=COALESCE(excluded.your_role, cached_submolts.your_role),
+       cached_at=datetime('now')`,
     [submolt.id ?? submolt.name, submolt.name, submolt.display_name ?? submolt.name ?? '',
      submolt.description ?? '', submolt.theme_color ?? '#7c5cfc',
      submolt.subscriber_count ?? 0, submolt.post_count ?? 0,
      0, JSON.stringify(submolt.moderators ?? []),
-     JSON.stringify(submolt.rules ?? []), submolt.created_at ?? new Date().toISOString()]
+     JSON.stringify(submolt.rules ?? []), submolt.your_role ?? null,
+     submolt.created_at ?? new Date().toISOString()]
   )
 }
 

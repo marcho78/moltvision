@@ -1,8 +1,10 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useState, useRef } from 'react'
 import { useStore } from '../../stores'
 import { invoke, on } from '../../lib/ipc'
 import { IPC } from '@shared/ipc-channels'
-import type { LLMProviderName, ApiKeyStatus } from '@shared/domain.types'
+import type { LLMProviderName, ApiKeyStatus, ThemeColors, ThemePresetId } from '@shared/domain.types'
+import { THEME_PRESETS, THEME_TOKEN_LABELS, resolveThemeColors } from '@shared/theme-presets'
+import { applyThemeToDOM } from '../../hooks/useTheme'
 
 function ApiKeyInput({ provider, status, onKeySaved }: { provider: string; status: ApiKeyStatus; onKeySaved: () => void }) {
   const [key, setKey] = useState('')
@@ -243,16 +245,190 @@ function LlmSelector() {
   return (
     <div className="panel-card">
       <h3 className="text-sm font-medium mb-3">Active LLM Provider</h3>
-      <div className="flex gap-2">
+      <div className="flex gap-0.5 bg-molt-bg rounded-lg p-0.5 max-w-sm">
         {providers.map((p) => (
           <button key={p} onClick={() => setActiveLlm(p)}
-            className={`flex-1 px-3 py-2 rounded-lg border text-sm capitalize transition-colors ${
-              activeLlm === p ? 'border-molt-accent bg-molt-accent/10 text-molt-accent' : 'border-molt-border text-molt-muted hover:border-molt-accent/30'
+            className={`flex-1 px-3 py-2 rounded-md text-xs capitalize transition-all ${
+              activeLlm === p ? 'bg-molt-surface text-molt-accent font-medium shadow-sm' : 'text-molt-muted hover:text-molt-text'
             }`}>
             {p}
           </button>
         ))}
       </div>
+    </div>
+  )
+}
+
+const SWATCH_KEYS: (keyof ThemeColors)[] = ['bg', 'accent', 'text', 'surface']
+const ALL_TOKEN_KEYS = Object.keys(THEME_TOKEN_LABELS) as (keyof ThemeColors)[]
+
+function ThemePreferences() {
+  const { theme, themeCustomColors, setTheme, setThemeCustomColors, addNotification } = useStore()
+  const [showCustomize, setShowCustomize] = useState(false)
+  const [localColors, setLocalColors] = useState<ThemeColors>(() => resolveThemeColors(theme, themeCustomColors))
+  const [dirty, setDirty] = useState(false)
+  const savedThemeRef = useRef(theme)
+  const savedCustomRef = useRef(themeCustomColors)
+
+  // When store theme changes externally (e.g. on load), sync local state
+  useEffect(() => {
+    savedThemeRef.current = theme
+    savedCustomRef.current = themeCustomColors
+    setLocalColors(resolveThemeColors(theme, themeCustomColors))
+    setDirty(false)
+  }, [theme, themeCustomColors])
+
+  const selectPreset = (id: ThemePresetId) => {
+    const preset = THEME_PRESETS.find((p) => p.id === id)!
+    setLocalColors(preset.colors)
+    // Apply live preview immediately
+    setTheme(id)
+    setThemeCustomColors(null)
+    applyThemeToDOM(preset.colors)
+    setShowCustomize(false)
+    setDirty(true)
+  }
+
+  const updateToken = (key: keyof ThemeColors, value: string) => {
+    const next = { ...localColors, [key]: value }
+    setLocalColors(next)
+    setTheme('custom')
+    setThemeCustomColors(next)
+    applyThemeToDOM(next)
+    setDirty(true)
+  }
+
+  const handleSave = async () => {
+    try {
+      const storeTheme = useStore.getState().theme
+      await invoke(IPC.SETTINGS_SAVE_PREFERENCES, {
+        theme: storeTheme,
+        theme_custom_colors: storeTheme === 'custom' ? localColors : null
+      })
+      savedThemeRef.current = storeTheme
+      savedCustomRef.current = storeTheme === 'custom' ? localColors : null
+      setDirty(false)
+      addNotification('Theme saved', 'success')
+    } catch {
+      addNotification('Failed to save theme', 'error')
+    }
+  }
+
+  const handleReset = () => {
+    const colors = resolveThemeColors(savedThemeRef.current, savedCustomRef.current)
+    setTheme(savedThemeRef.current)
+    setThemeCustomColors(savedCustomRef.current)
+    setLocalColors(colors)
+    applyThemeToDOM(colors)
+    setDirty(false)
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="panel-card">
+        <h3 className="text-sm font-medium mb-3">Theme</h3>
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+          {THEME_PRESETS.map((preset) => {
+            const active = theme === preset.id && theme !== 'custom'
+            return (
+              <button
+                key={preset.id}
+                onClick={() => selectPreset(preset.id)}
+                className={`relative rounded-lg border p-3 text-left transition-all ${
+                  active
+                    ? 'border-molt-accent ring-1 ring-molt-accent/40'
+                    : 'border-molt-border hover:border-molt-muted'
+                }`}
+              >
+                {/* 4-swatch preview */}
+                <div className="flex gap-1 mb-2">
+                  {SWATCH_KEYS.map((k) => (
+                    <div
+                      key={k}
+                      className="w-5 h-5 rounded-sm border border-black/20"
+                      style={{ backgroundColor: preset.colors[k] }}
+                    />
+                  ))}
+                </div>
+                <span className="text-xs font-medium">{preset.name}</span>
+                {active && (
+                  <div className="absolute top-1.5 right-1.5">
+                    <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" className="text-molt-accent">
+                      <path d="M8 1a7 7 0 100 14A7 7 0 008 1zm3.7 5.3l-4 4a1 1 0 01-1.4 0l-2-2a1 1 0 011.4-1.4L7 8.2l3.3-3.3a1 1 0 011.4 1.4z" />
+                    </svg>
+                  </div>
+                )}
+              </button>
+            )
+          })}
+
+          {/* Custom card */}
+          <button
+            onClick={() => setShowCustomize((v) => !v)}
+            className={`relative rounded-lg border p-3 text-left transition-all ${
+              theme === 'custom'
+                ? 'border-molt-accent ring-1 ring-molt-accent/40'
+                : 'border-molt-border hover:border-molt-muted'
+            }`}
+          >
+            <div className="flex gap-1 mb-2">
+              {SWATCH_KEYS.map((k) => (
+                <div
+                  key={k}
+                  className="w-5 h-5 rounded-sm border border-black/20"
+                  style={{ backgroundColor: localColors[k] }}
+                />
+              ))}
+            </div>
+            <span className="text-xs font-medium">Custom</span>
+            {theme === 'custom' && (
+              <div className="absolute top-1.5 right-1.5">
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" className="text-molt-accent">
+                  <path d="M8 1a7 7 0 100 14A7 7 0 008 1zm3.7 5.3l-4 4a1 1 0 01-1.4 0l-2-2a1 1 0 011.4-1.4L7 8.2l3.3-3.3a1 1 0 011.4 1.4z" />
+                </svg>
+              </div>
+            )}
+          </button>
+        </div>
+      </div>
+
+      {/* Custom color editor */}
+      {showCustomize && (
+        <div className="panel-card">
+          <h3 className="text-sm font-medium mb-3">Customize Colors</h3>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            {ALL_TOKEN_KEYS.map((key) => (
+              <label key={key} className="flex items-center gap-2">
+                <input
+                  type="color"
+                  value={localColors[key]}
+                  onChange={(e) => updateToken(key, e.target.value)}
+                  className="w-7 h-7 rounded border border-molt-border cursor-pointer bg-transparent p-0"
+                />
+                <span className="text-xs text-molt-muted flex-1">{THEME_TOKEN_LABELS[key]}</span>
+                <input
+                  type="text"
+                  value={localColors[key]}
+                  onChange={(e) => {
+                    const v = e.target.value
+                    if (/^#[0-9a-fA-F]{6}$/.test(v)) updateToken(key, v)
+                  }}
+                  className="input-field text-xs w-20 py-1 px-2 font-mono"
+                  maxLength={7}
+                />
+              </label>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Save / Reset */}
+      {dirty && (
+        <div className="flex gap-2">
+          <button onClick={handleSave} className="btn-primary text-sm">Save Theme</button>
+          <button onClick={handleReset} className="btn-secondary text-sm">Discard</button>
+        </div>
+      )}
     </div>
   )
 }
@@ -297,7 +473,7 @@ export function SettingsPanel() {
           ))}
         </div>
       </div>
-      <div className="flex-1 overflow-y-auto p-4 space-y-3">
+      <div className="flex-1 overflow-y-auto p-4"><div className="max-w-2xl mx-auto space-y-3">
         {activeTab === 'api' && (
           <>
             <MoltbookRegister />
@@ -308,12 +484,7 @@ export function SettingsPanel() {
           </>
         )}
         {activeTab === 'llm' && <LlmSelector />}
-        {activeTab === 'preferences' && (
-          <div className="panel-card">
-            <h3 className="text-sm font-medium mb-3">Preferences</h3>
-            <p className="text-sm text-molt-muted">Theme, layout, and behavior preferences.</p>
-          </div>
-        )}
+        {activeTab === 'preferences' && <ThemePreferences />}
         {activeTab === 'data' && (
           <div className="space-y-3">
             <SubmoltDatabase />
@@ -340,7 +511,7 @@ export function SettingsPanel() {
             <p className="text-xs text-molt-muted mt-2">All-in-one AI agent for Moltbook</p>
           </div>
         )}
-      </div>
+      </div></div>
     </div>
   )
 }

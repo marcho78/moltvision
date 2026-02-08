@@ -3,8 +3,7 @@ import type {
   AgentAction, AgentPersona, AutopilotStatus, ChatRequest, ChatResponse,
   KarmaSnapshot, PostPerformance, ActivityLogEntry, RateLimitState,
   GalaxyNode, GalaxyEdge, NetworkNode, NetworkEdge, SearchCluster,
-  UserPreferences, ApiKeyStatus, MoodData, TrendItem, Rivalry,
-  KarmaForecast, PostIdea, VoteDirection, OperationMode,
+  UserPreferences, ApiKeyStatus, VoteDirection, OperationMode,
   LLMProviderName, SortOrder, ActionStatus, KeyValidationResult
 } from './domain.types'
 
@@ -352,24 +351,3 @@ export interface SettingsExportResponse {
   filename: string
 }
 
-// --- Bonus ---
-
-export interface BonusMoodResponse {
-  mood: MoodData
-}
-
-export interface BonusTrendsResponse {
-  trends: TrendItem[]
-}
-
-export interface BonusRivalriesResponse {
-  rivalries: Rivalry[]
-}
-
-export interface BonusForecastResponse {
-  forecast: KarmaForecast
-}
-
-export interface BonusIdeasResponse {
-  ideas: PostIdea[]
-}

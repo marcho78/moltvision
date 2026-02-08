@@ -83,6 +83,7 @@ CREATE TABLE IF NOT EXISTS cached_submolts (
   is_subscribed INTEGER NOT NULL DEFAULT 0,
   moderators TEXT NOT NULL DEFAULT '[]',
   rules TEXT NOT NULL DEFAULT '[]',
+  your_role TEXT,
   created_at TEXT NOT NULL,
   cached_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -281,3 +282,21 @@ CREATE TABLE IF NOT EXISTS reply_inbox (
 );
 CREATE INDEX IF NOT EXISTS idx_inbox_read ON reply_inbox(is_read);
 CREATE INDEX IF NOT EXISTS idx_inbox_time ON reply_inbox(discovered_at DESC);
+
+-- =====================================================
+-- Token Usage Tracking (Migration v8)
+-- =====================================================
+
+CREATE TABLE IF NOT EXISTS token_usage (
+  id TEXT PRIMARY KEY,
+  purpose TEXT NOT NULL,
+  provider TEXT NOT NULL,
+  model TEXT NOT NULL,
+  tokens_input INTEGER NOT NULL DEFAULT 0,
+  tokens_output INTEGER NOT NULL DEFAULT 0,
+  persona_id TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_token_usage_time ON token_usage(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_token_usage_purpose ON token_usage(purpose);
+CREATE INDEX IF NOT EXISTS idx_token_usage_provider ON token_usage(provider);

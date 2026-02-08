@@ -407,7 +407,14 @@ export function registerApiHandlers(mainWindow?: BrowserWindow | null): void {
   })
 
   ipcMain.handle(IPC.SUBMOLTS_GET_DETAIL, async (_e, payload) => {
-    return await moltbookClient.getSubmoltDetail(payload.submolt_name)
+    const detail = await moltbookClient.getSubmoltDetail(payload.submolt_name)
+    // Cache with role so owned/moderated submolts survive restarts
+    if (detail?.your_role) {
+      try { upsertSubmolt(detail) } catch (err: any) {
+        log.warn('Failed to cache submolt detail:', err.message)
+      }
+    }
+    return detail
   })
 
   ipcMain.handle(IPC.SUBMOLTS_GET_FEED, async (_e, payload) => {
@@ -435,7 +442,20 @@ export function registerApiHandlers(mainWindow?: BrowserWindow | null): void {
   })
 
   ipcMain.handle(IPC.SUBMOLTS_CREATE, async (_e, payload) => {
-    return await moltbookClient.createSubmolt(payload.name, payload.display_name, payload.description)
+    const result = await moltbookClient.createSubmolt(payload.name, payload.display_name, payload.description)
+    // Cache locally with owner role so it survives restarts
+    try {
+      upsertSubmolt({
+        id: result?.id ?? payload.name,
+        name: payload.name,
+        display_name: payload.display_name ?? payload.name,
+        description: payload.description ?? '',
+        your_role: 'owner'
+      })
+    } catch (err: any) {
+      log.warn('Failed to cache created submolt:', err.message)
+    }
+    return result
   })
 
   ipcMain.handle(IPC.SUBMOLTS_SUBSCRIBE, async (_e, payload) => {

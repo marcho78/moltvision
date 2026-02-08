@@ -778,6 +778,7 @@ export function GalaxyMapPanel() {
       is_subscribed: node.is_subscribed,
       moderators: [],
       rules: [],
+      your_role: null,
       created_at: ''
     })
     invoke(IPC.SUBMOLTS_GET_DETAIL, { submolt_name: node.name })
@@ -793,6 +794,7 @@ export function GalaxyMapPanel() {
           is_subscribed: detail.is_subscribed ?? node.is_subscribed,
           moderators: detail.moderators ?? [],
           rules: detail.rules ?? [],
+          your_role: detail.your_role ?? null,
           created_at: detail.created_at ?? ''
         })
       })

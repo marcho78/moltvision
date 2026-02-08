@@ -24,8 +24,7 @@ export function CommandPalette() {
     { id: 'analytics', label: 'Go to Analytics', action: () => setActivePanel('analytics') },
     { id: 'autopilot', label: 'Go to Autopilot', action: () => setActivePanel('autopilot') },
     { id: 'moderation', label: 'Go to Moderation', action: () => setActivePanel('moderation') },
-    { id: 'settings', label: 'Go to Settings', action: () => setActivePanel('settings') },
-    { id: 'bonus', label: 'Go to Bonus Features', action: () => setActivePanel('bonus') }
+    { id: 'settings', label: 'Go to Settings', action: () => setActivePanel('settings') }
   ]
 
   const filtered = query

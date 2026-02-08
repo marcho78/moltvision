@@ -1,6 +1,7 @@
 import { EventEmitter } from 'events'
 import log from 'electron-log'
 import type { ChatMessage, ChatRequest, ChatResponse, StreamChunk, LLMProviderName, KeyValidationResult, ProviderHealth, TokenCountResult } from '../../shared/domain.types'
+import { recordTokenUsage } from '../db/queries/analytics.queries'
 
 // --- LLM Provider Interface ---
 
@@ -558,6 +559,7 @@ export class LLMManager extends EventEmitter {
 
       const response = await provider.chat(request)
       this.emit('call:completed', { provider: providerName, tokens: response.tokens_input + response.tokens_output, cost: response.cost })
+      this.logTokenUsage(request, response)
       return response
     } catch (err) {
       this.emit('call:failed', { provider: providerName, error: err })
@@ -569,10 +571,27 @@ export class LLMManager extends EventEmitter {
         if (fallback) {
           const response = await fallback.chat(request)
           this.emit('call:completed', { provider: this.fallbackProvider, tokens: response.tokens_input + response.tokens_output, cost: response.cost })
+          this.logTokenUsage(request, response)
           return response
         }
       }
       throw err
+    }
+  }
+
+  private logTokenUsage(request: ChatRequest, response: ChatResponse): void {
+    try {
+      recordTokenUsage({
+        purpose: request.purpose ?? 'manual_generation',
+        provider: response.provider,
+        model: response.model,
+        tokens_input: response.tokens_input,
+        tokens_output: response.tokens_output,
+        persona_id: null
+      })
+    } catch (err) {
+      // Non-critical — don't let tracking failures break LLM calls
+      log.warn('Failed to record token usage:', err)
     }
   }
 

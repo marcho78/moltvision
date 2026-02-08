@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react'
+import React, { useEffect, useState, useCallback, useMemo } from 'react'
 import { useStore } from '../../stores'
 // useAutopilotEvents is called in App.tsx — not here (avoids duplicate listeners)
 import { invoke } from '../../lib/ipc'
@@ -17,6 +17,81 @@ function safeStr(val: unknown): string {
   return String(val)
 }
 
+// ─── Expandable Reasoning ────────────────────────────────
+
+function ExpandableReasoning({ reasoning, compact }: { reasoning: string; compact?: boolean }) {
+  const [expanded, setExpanded] = useState(false)
+
+  // Try to parse structured JSON reasoning (from evaluatePost / planAction)
+  const parsed = useMemo(() => {
+    try {
+      const obj = JSON.parse(reasoning)
+      if (obj && typeof obj === 'object' && (obj.reasoning || obj.verdict || obj.thinking)) return obj
+    } catch { /* not JSON, use raw string */ }
+    return null
+  }, [reasoning])
+
+  const displayText = parsed?.reasoning ?? parsed?.thinking ?? reasoning
+  const verdict = parsed?.verdict
+  const strategies = parsed?.active_strategies ?? parsed?.strategies
+
+  // Short reasoning (< 80 chars) doesn't need expand
+  if (displayText.length < 80 && !verdict && !strategies) {
+    return (
+      <div className={`${compact ? 'text-[10px]' : 'text-[11px]'} text-molt-muted`}>
+        {verdict && (
+          <span className={`font-semibold mr-1.5 ${verdict === 'engage' ? 'text-molt-success' : verdict === 'skip' ? 'text-molt-warning' : 'text-molt-muted'}`}>
+            [{verdict.toUpperCase()}]
+          </span>
+        )}
+        {displayText}
+      </div>
+    )
+  }
+
+  return (
+    <div className={`${compact ? 'text-[10px]' : 'text-[11px]'} text-molt-muted`}>
+      <button
+        onClick={(e) => { e.stopPropagation(); setExpanded(!expanded) }}
+        className="flex items-center gap-1 text-molt-accent hover:text-molt-accent-hover transition-colors mb-0.5"
+      >
+        <span className="text-[10px]">{expanded ? '▾' : '▸'}</span>
+        <span>{expanded ? 'Hide reasoning' : 'Show reasoning'}</span>
+        {verdict && (
+          <span className={`font-semibold ml-1 ${verdict === 'engage' ? 'text-molt-success' : verdict === 'skip' ? 'text-molt-warning' : 'text-molt-muted'}`}>
+            [{verdict.toUpperCase()}]
+          </span>
+        )}
+      </button>
+
+      {expanded && (
+        <div className="bg-molt-bg rounded-lg p-2.5 mt-1 space-y-1.5 border border-molt-border/50">
+          {strategies && Array.isArray(strategies) && strategies.length > 0 && (
+            <div className="flex flex-wrap gap-1 mb-1">
+              {strategies.map((s: string, i: number) => (
+                <span key={i} className="px-1.5 py-0.5 rounded text-[9px] bg-molt-accent/10 text-molt-accent">
+                  {s}
+                </span>
+              ))}
+            </div>
+          )}
+          <p className="whitespace-pre-wrap leading-relaxed">{displayText}</p>
+          {parsed?.priority != null && (
+            <div className="text-[10px] text-molt-muted pt-1 border-t border-molt-border/30">
+              Priority: {parsed.priority}/10
+              {parsed?.action && <span className="ml-2">Action: {parsed.action}</span>}
+            </div>
+          )}
+        </div>
+      )}
+
+      {!expanded && (
+        <p className="line-clamp-1 mt-0.5">{displayText}</p>
+      )}
+    </div>
+  )
+}
+
 // ─── Tab Type ────────────────────────────────────────────
 
 type AutopilotTab = 'controls' | 'activity' | 'queue' | 'replies'
@@ -26,10 +101,10 @@ type AutopilotTab = 'controls' | 'activity' | 'queue' | 'replies'
 function ModeToggle() {
   const { autopilotStatus, setAutopilotStatus, addNotification } = useStore()
   const modes: OperationMode[] = ['off', 'semi-auto', 'autopilot']
-  const modeInfo: Record<OperationMode, { label: string; color: string; desc: string }> = {
-    off: { label: 'Off', color: 'bg-molt-muted', desc: 'Agent is idle' },
-    'semi-auto': { label: 'Semi-Auto', color: 'bg-molt-warning', desc: 'Proposes actions for your approval' },
-    autopilot: { label: 'Autopilot', color: 'bg-molt-success', desc: 'Fully autonomous within safety limits' }
+  const modeInfo: Record<OperationMode, { label: string; dot: string }> = {
+    off: { label: 'Off', dot: 'bg-molt-muted' },
+    'semi-auto': { label: 'Semi-Auto', dot: 'bg-molt-warning' },
+    autopilot: { label: 'Autopilot', dot: 'bg-molt-success' }
   }
 
   const handleSetMode = async (mode: OperationMode) => {
@@ -42,27 +117,21 @@ function ModeToggle() {
   }
 
   return (
-    <div className="panel-card">
-      <h3 className="text-sm font-medium mb-3">Operation Mode</h3>
-      <div className="flex gap-2">
-        {modes.map((mode) => {
-          const info = modeInfo[mode]
-          return (
-            <button key={mode} onClick={() => handleSetMode(mode)}
-              className={`flex-1 p-3 rounded-lg border transition-colors text-left ${
-                autopilotStatus.mode === mode
-                  ? 'border-molt-accent bg-molt-accent/10'
-                  : 'border-molt-border hover:border-molt-accent/30'
-              }`}>
-              <div className="flex items-center gap-2 mb-1">
-                <div className={`w-2 h-2 rounded-full ${info.color}`} />
-                <span className="text-sm font-medium">{info.label}</span>
-              </div>
-              <p className="text-xs text-molt-muted">{info.desc}</p>
-            </button>
-          )
-        })}
-      </div>
+    <div className="flex gap-0.5 bg-molt-bg rounded-lg p-0.5">
+      {modes.map((mode) => {
+        const info = modeInfo[mode]
+        return (
+          <button key={mode} onClick={() => handleSetMode(mode)}
+            className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2 text-xs rounded-md transition-all ${
+              autopilotStatus.mode === mode
+                ? 'bg-molt-surface text-molt-text font-medium shadow-sm'
+                : 'text-molt-muted hover:text-molt-text'
+            }`}>
+            <div className={`w-1.5 h-1.5 rounded-full ${info.dot}`} />
+            {info.label}
+          </button>
+        )
+      })}
     </div>
   )
 }
@@ -95,8 +164,8 @@ function PersonaSelector() {
   }
 
   return (
-    <div className="panel-card">
-      <h3 className="text-sm font-medium mb-2">Active Persona</h3>
+    <div className="space-y-1.5">
+      <label className="text-[11px] text-molt-muted">Active Persona</label>
       <select
         value={activePersonaId}
         onChange={(e) => handleChange(e.target.value)}
@@ -110,8 +179,8 @@ function PersonaSelector() {
         ))}
       </select>
       {savedPersonas.length > 0 && (
-        <p className="text-[10px] text-molt-muted mt-1.5">
-          {safeStr(savedPersonas.find(p => p.id === activePersonaId)?.description) || 'Configure personas in the Persona Studio panel'}
+        <p className="text-[10px] text-molt-muted">
+          {safeStr(savedPersonas.find(p => p.id === activePersonaId)?.description) || 'Configure in Persona Studio'}
         </p>
       )}
     </div>
@@ -149,6 +218,7 @@ function TargetSubmolts() {
               is_subscribed: s.is_subscribed ?? false,
               moderators: s.moderators ?? [],
               rules: s.rules ?? [],
+              your_role: s.your_role ?? null,
               created_at: s.created_at ?? ''
             }))
             setSubmolts(normalized)
@@ -257,13 +327,13 @@ function TargetSubmolts() {
         <div className="space-y-1.5">
           {entries.map(([name, priority]) => (
             <div key={name} className="flex items-center gap-2 bg-molt-bg rounded-lg px-2.5 py-1.5">
-              <span className="text-xs font-medium text-molt-text w-24 truncate" title={`m/${name}`}>m/{safeStr(name)}</span>
+              <span className="text-xs font-medium text-molt-text w-24 truncate shrink-0" title={`m/${name}`}>m/{safeStr(name)}</span>
               <input type="range" min="1" max="10" step="1" value={typeof priority === 'number' ? priority : 5}
                 onChange={(e) => setPriority(name, parseInt(e.target.value))}
-                className="flex-1 h-1" />
-              <span className="text-[10px] text-molt-muted w-4 text-center">{safeStr(priority)}</span>
+                className="w-full max-w-[180px] h-1" />
+              <span className="text-[10px] text-molt-muted w-4 text-center shrink-0">{safeStr(priority)}</span>
               <button onClick={() => removeSubmolt(name)}
-                className="text-molt-muted hover:text-molt-error text-sm transition-colors w-4">&times;</button>
+                className="text-molt-muted hover:text-molt-error text-sm transition-colors w-4 shrink-0">&times;</button>
             </div>
           ))}
         </div>
@@ -276,16 +346,16 @@ function TargetSubmolts() {
 
 function RateLimitDashboard() {
   const limits = [
-    { label: 'General API', max: 100, resource: 'moltbook_general' },
-    { label: 'Post Creation', max: 1, resource: 'moltbook_posts' },
-    { label: 'Comments/Day', max: 50, resource: 'moltbook_comments' }
+    { label: 'General', max: 100, resource: 'moltbook_general' },
+    { label: 'Posts', max: 1, resource: 'moltbook_posts' },
+    { label: 'Comments', max: 50, resource: 'moltbook_comments' }
   ]
   const rateLimits = useStore((s) => s.rateLimits)
 
   return (
     <div className="panel-card">
-      <h3 className="text-sm font-medium mb-2">API Rate Limits</h3>
-      <div className="space-y-2">
+      <h3 className="text-xs font-medium text-molt-muted uppercase tracking-wider mb-2">Rate Limits</h3>
+      <div className="space-y-1.5">
         {limits.map((lim) => {
           const current = rateLimits.find(r => r.resource === lim.resource)
           const remaining = current?.remaining ?? lim.max
@@ -293,11 +363,11 @@ function RateLimitDashboard() {
           const color = pct > 50 ? 'bg-molt-success' : pct > 20 ? 'bg-molt-warning' : 'bg-molt-error'
           return (
             <div key={lim.resource} className="flex items-center gap-2">
-              <span className="text-xs text-molt-muted w-28 truncate">{lim.label}</span>
-              <div className="flex-1 h-1.5 bg-molt-bg rounded-full overflow-hidden">
+              <span className="text-[11px] text-molt-muted w-16 shrink-0">{lim.label}</span>
+              <div className="flex-1 h-1 bg-molt-bg rounded-full overflow-hidden">
                 <div className={`h-full ${color} rounded-full transition-all`} style={{ width: `${pct}%` }} />
               </div>
-              <span className="text-[10px] text-molt-muted w-12 text-right">{remaining}/{lim.max}</span>
+              <span className="text-[10px] text-molt-muted w-10 text-right shrink-0">{remaining}/{lim.max}</span>
             </div>
           )
         })}
@@ -324,8 +394,8 @@ function EmergencyStop() {
   return (
     <button onClick={handleStop}
       disabled={autopilotStatus.mode === 'off'}
-      className="w-full py-3 rounded-xl bg-molt-error/20 hover:bg-molt-error/40 border-2 border-molt-error
-                 text-molt-error font-bold text-sm transition-colors disabled:opacity-30 disabled:cursor-not-allowed">
+      className="w-full max-w-xs mx-auto block py-2 rounded-lg bg-molt-error/20 hover:bg-molt-error/40 border border-molt-error
+                 text-molt-error font-bold text-xs transition-colors disabled:opacity-30 disabled:cursor-not-allowed">
       EMERGENCY STOP
     </button>
   )
@@ -419,65 +489,78 @@ function ControlsTab() {
   const { autopilotStatus } = useStore()
 
   return (
-    <div className="space-y-4">
-      <ModeToggle />
-      <PersonaSelector />
-      <TargetSubmolts />
-      <LiveAgentFeed />
+    <div className="space-y-4 max-w-2xl mx-auto">
+      {/* Row 1: Mode + Persona — compact top controls */}
+      <div className="panel-card space-y-3">
+        <ModeToggle />
+        <PersonaSelector />
+      </div>
 
-      {/* Engagement stats — real counts from agent_engagements */}
-      <div className="panel-card space-y-2.5">
-        <h3 className="text-sm font-medium">Agent Activity</h3>
-        <div className="grid grid-cols-3 gap-3">
-          <div className="bg-molt-bg rounded-lg p-2.5 text-center">
-            <div className="text-[10px] text-molt-muted">Comments/Hour</div>
-            <div className="text-lg font-bold text-molt-text">{autopilotStatus.comments_this_hour ?? 0}</div>
-          </div>
-          <div className="bg-molt-bg rounded-lg p-2.5 text-center">
-            <div className="text-[10px] text-molt-muted">Comments Today</div>
-            <div className={`text-lg font-bold ${(autopilotStatus.comments_today ?? 0) >= 45 ? 'text-molt-warning' : (autopilotStatus.comments_today ?? 0) >= 50 ? 'text-molt-error' : 'text-molt-text'}`}>
-              {autopilotStatus.comments_today ?? 0}
-              <span className="text-xs text-molt-muted font-normal"> / 50</span>
+      {/* Row 2: Two-column — Activity stats + Rate limits side by side */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        {/* Agent Activity stats */}
+        <div className="panel-card space-y-2">
+          <div className="flex items-center justify-between">
+            <h3 className="text-xs font-medium text-molt-muted uppercase tracking-wider">Activity</h3>
+            <div className="flex items-center gap-1.5">
+              <div className={`w-1.5 h-1.5 rounded-full ${
+                autopilotStatus.emergency_stopped ? 'bg-molt-error' :
+                autopilotStatus.is_running ? 'bg-molt-success animate-pulse' : 'bg-molt-muted'
+              }`} />
+              <span className={`text-[10px] font-medium ${
+                autopilotStatus.emergency_stopped ? 'text-molt-error' :
+                autopilotStatus.is_running ? 'text-molt-success' : 'text-molt-muted'
+              }`}>
+                {autopilotStatus.emergency_stopped ? 'STOPPED' : autopilotStatus.is_running ? 'ACTIVE' : 'IDLE'}
+              </span>
             </div>
           </div>
-          <div className="bg-molt-bg rounded-lg p-2.5 text-center">
-            <div className="text-[10px] text-molt-muted">Posts Today</div>
-            <div className="text-lg font-bold text-molt-text">{autopilotStatus.posts_today ?? 0}</div>
+
+          <div className="grid grid-cols-3 gap-1.5">
+            <div className="bg-molt-bg rounded-md px-2 py-1.5 text-center">
+              <div className="text-[9px] text-molt-muted leading-tight">Cmt/hr</div>
+              <div className="text-sm font-bold text-molt-text">{autopilotStatus.comments_this_hour ?? 0}</div>
+            </div>
+            <div className="bg-molt-bg rounded-md px-2 py-1.5 text-center">
+              <div className="text-[9px] text-molt-muted leading-tight">Cmt/day</div>
+              <div className={`text-sm font-bold ${(autopilotStatus.comments_today ?? 0) >= 45 ? 'text-molt-warning' : 'text-molt-text'}`}>
+                {autopilotStatus.comments_today ?? 0}
+                <span className="text-[9px] text-molt-muted font-normal">/50</span>
+              </div>
+            </div>
+            <div className="bg-molt-bg rounded-md px-2 py-1.5 text-center">
+              <div className="text-[9px] text-molt-muted leading-tight">Posts</div>
+              <div className="text-sm font-bold text-molt-text">{autopilotStatus.posts_today ?? 0}</div>
+            </div>
+          </div>
+
+          {/* Comment limit bar */}
+          <div className="space-y-0.5">
+            <div className="h-1 bg-molt-bg rounded-full overflow-hidden">
+              <div
+                className={`h-full rounded-full transition-all ${
+                  (autopilotStatus.comments_today ?? 0) >= 50 ? 'bg-molt-error' :
+                  (autopilotStatus.comments_today ?? 0) >= 40 ? 'bg-molt-warning' : 'bg-molt-success'
+                }`}
+                style={{ width: `${Math.min(((autopilotStatus.comments_today ?? 0) / 50) * 100, 100)}%` }}
+              />
+            </div>
+            <div className="text-[9px] text-molt-muted text-right">{autopilotStatus.comments_today ?? 0}/50 daily</div>
           </div>
         </div>
 
-        {/* Daily comment limit progress bar */}
-        <div className="space-y-1">
-          <div className="flex items-center justify-between text-[10px]">
-            <span className="text-molt-muted">Daily comment limit</span>
-            <span className="text-molt-muted">{autopilotStatus.comments_today ?? 0} / 50</span>
-          </div>
-          <div className="h-1.5 bg-molt-bg rounded-full overflow-hidden">
-            <div
-              className={`h-full rounded-full transition-all ${
-                (autopilotStatus.comments_today ?? 0) >= 50 ? 'bg-molt-error' :
-                (autopilotStatus.comments_today ?? 0) >= 40 ? 'bg-molt-warning' : 'bg-molt-success'
-              }`}
-              style={{ width: `${Math.min(((autopilotStatus.comments_today ?? 0) / 50) * 100, 100)}%` }}
-            />
-          </div>
-        </div>
-
-        {/* Status indicator */}
-        <div className="flex items-center justify-center gap-2 pt-1">
-          <div className={`w-2 h-2 rounded-full ${
-            autopilotStatus.emergency_stopped ? 'bg-molt-error' :
-            autopilotStatus.is_running ? 'bg-molt-success animate-pulse' : 'bg-molt-muted'
-          }`} />
-          <span className={`text-xs font-medium ${
-            autopilotStatus.emergency_stopped ? 'text-molt-error' :
-            autopilotStatus.is_running ? 'text-molt-success' : 'text-molt-muted'
-          }`}>
-            {autopilotStatus.emergency_stopped ? 'EMERGENCY STOPPED' : autopilotStatus.is_running ? 'ACTIVE' : 'IDLE'}
-          </span>
+        {/* Rate limits + Emergency stop */}
+        <div className="space-y-3">
+          <RateLimitDashboard />
+          <EmergencyStop />
         </div>
       </div>
-      <EmergencyStop />
+
+      {/* Row 3: Target Submolts — full width but constrained by max-w-2xl mx-auto */}
+      <TargetSubmolts />
+
+      {/* Row 4: Live Agent Thinking — full width */}
+      <LiveAgentFeed />
 
       {autopilotStatus.last_scan_at && (
         <p className="text-[10px] text-molt-muted text-center">
@@ -528,7 +611,7 @@ function ActivityTab() {
   }
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-3 max-w-2xl mx-auto">
       <div className="flex gap-1">
         {[null, 'create_post', 'create_comment', 'upvote'].map((f) => (
           <button key={f ?? 'all'} onClick={() => setFilter(f)}
@@ -568,7 +651,7 @@ function ActivityTab() {
               <p className="text-xs text-molt-text line-clamp-2 mb-1">{safeStr(entry.content_sent)}</p>
             )}
             {entry.reasoning && (
-              <p className="text-[10px] text-molt-muted line-clamp-1">{safeStr(entry.reasoning)}</p>
+              <ExpandableReasoning reasoning={safeStr(entry.reasoning)} compact />
             )}
           </div>
         )
@@ -703,9 +786,7 @@ function ActionQueueItem({ action, onRefresh }: { action: AgentAction; onRefresh
 
       {/* Reasoning */}
       {action.reasoning && (
-        <div className="text-[10px] text-molt-muted">
-          <span className="uppercase tracking-wider">Reasoning:</span> {safeStr(action.reasoning)}
-        </div>
+        <ExpandableReasoning reasoning={safeStr(action.reasoning)} />
       )}
 
       {/* Actions */}
@@ -770,7 +851,7 @@ function QueueTab() {
   }
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-3 max-w-2xl mx-auto">
       {autopilotStatus.mode === 'semi-auto' && (
         <div className="text-xs text-molt-muted bg-molt-surface rounded-lg px-3 py-2">
           Semi-auto mode: review and approve each action before execution. You can edit the agent's draft before approving.
@@ -869,7 +950,7 @@ function RepliesTab() {
   }
 
   return (
-    <div className="space-y-2">
+    <div className="space-y-2 max-w-2xl mx-auto">
       {unreadReplyCount > 0 && (
         <button
           onClick={() => handleMarkRead(replyInbox.filter(r => !r.is_read).map(r => r.id))}

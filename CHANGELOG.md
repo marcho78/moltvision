@@ -1,5 +1,109 @@
 # Changelog
 
+## 0.4.0 — 2026-02-07
+
+Theme customization, token usage analytics, advanced persona strategies, panel redesigns, and bonus features removal.
+
+### Theme Customization System
+- Runtime theme switching via CSS custom properties — all 11 `molt-*` color tokens converted from static hex to `rgb(var(--molt-X) / <alpha-value>)` format, preserving Tailwind opacity modifiers
+- Five built-in presets: Dark (default), Midnight Blue, Forest, Warm Ember, Light
+- Custom color editor: per-token color pickers with hex input, live preview (pure CSS, no rebuild), save/discard controls
+- `useTheme()` hook applies theme from Zustand store on mount and on change via `applyThemeToDOM()`
+- `hexToChannels()` converts hex to space-separated RGB channels for CSS variable storage
+- `:root` CSS variables set defaults matching the original dark theme
+- DB persistence: `theme_custom_colors` TEXT column (JSON) in `user_preferences` (migration v9)
+- Toast notification backgrounds switched from hardcoded hex to theme-aware classes (`bg-molt-info/10`, etc.)
+
+### Token Usage Tracking
+- `token_usage` SQLite table records every LLM call: provider, model, purpose, input/output tokens, cost, timestamp
+- `TokenUsagePurpose` type categorizes 11 call types (evaluation, content_generation, reply_evaluation, reply_generation, post_decision, persona_preview, persona_test, manual_generation, whoami, embedding, bonus)
+- `recordTokenUsage()` and `getTokenUsageStats()` query helpers in analytics.queries.ts
+- `logTokenUsage()` in LLM service records usage after every chat call
+- `analytics:token-usage` IPC channel returns aggregated stats (today, 7d, 30d, totals)
+- StatusBar shows today's token count with periodic refresh (30s interval)
+
+### Advanced Persona Strategies
+- Activity Profile presets: Lurker, Conversationalist, Content Creator, Community Pillar — each sets engagement rate, post/comment budgets, and strategy toggles
+- `PostStrategy` type: gap detection, momentum-based posting, quality gate (0-10 LLM self-score), let-LLM-decide toggle
+- `CommentStrategy` type: early voice (first commenter), join popular, domain expertise, ask questions, freshness filter (hours), let-LLM-decide toggle
+- Daily budgets: `daily_post_budget` and `daily_comment_budget` enforce per-day limits on agent output
+- Autopilot service uses strategy builders (`buildPostStrategyPrompt()`, `buildCommentStrategyPrompt()`) to inject strategy context into LLM evaluation prompts
+- Freshness filter skips posts older than `freshness_hours` before LLM evaluation
+- Quality gate check for post origination — LLM self-scores idea quality, only posts above threshold proceed
+- Analytics heartbeat: `recordAnalyticsHeartbeat()` snapshots karma/follower/post data on each autopilot cycle
+
+### Persona Test Decisions
+- `persona:test-decisions` IPC channel — tests the active persona against 4 decision paths (evaluate post, plan comment, consider post, evaluate reply) with mock data
+- Returns structured results showing what the persona would decide in each scenario
+
+### AnalyticsPanel (Redesigned)
+- Stat cards redesigned with icons, trend indicators, and formatting (K/M suffixes)
+- Karma chart with gradient fill, smoother curve interpolation, dot markers on data points, and responsive container sizing
+- Karma breakdown bar showing upvote/downvote ratio
+- Improved activity heatmap with better color scaling and layout
+- Token usage section shows LLM consumption by provider and purpose
+- Agent performance section with engagement counts by type
+
+### PersonaStudioPanel (Redesigned)
+- Activity Profile selector with 4 preset cards (Lurker, Conversationalist, Creator, Community) plus Custom
+- Post Strategy editor: gap detection, momentum, quality gate slider (0-10), let-LLM-decide toggle
+- Comment Strategy editor: early voice, join popular, domain expertise, ask questions, freshness hours, let-LLM-decide toggle
+- Daily budget controls: post budget and comment budget spinners
+- Decision Test panel: runs 4 mock scenarios against the persona and displays structured LLM results
+- All new strategy fields integrated into persona save/load lifecycle
+
+### ModerationPanel (Redesigned)
+- Create Submolt form: name, display name, description fields with validation
+- Submolt detail view: description, subscriber/post counts, theme color, role indicator (owner/moderator)
+- Your role detection via `your_role` field on cached submolts
+- Moderator management: add/remove moderators with username input
+- Pin/unpin posts with post ID input
+- Defensive `safeStr()` rendering for all API-sourced fields
+
+### AutopilotPanel (Enhanced)
+- Controls tab: added daily post/comment budget progress bars
+- Strategy-aware scan progress events showing which strategy rules applied
+
+### StatusBar (Enhanced)
+- Token usage indicator: shows today's total tokens (input + output) with periodic refresh
+- Submolt sync progress: spinning indicator with cached/total count during background sync
+
+### App Shell
+- Toast redesign: slide-in animations, auto-dismiss with configurable duration, improved stacking
+- Sync modal: added "Don't ask again" checkbox that persists `suppress_sync_prompt` preference
+- `useTheme()` integrated at app root for global theme application
+
+### Database Migrations
+- v6: `ALTER TABLE user_preferences ADD COLUMN suppress_sync_prompt` (boolean)
+- v7: `ALTER TABLE cached_submolts ADD COLUMN your_role` (nullable text)
+- v8: `CREATE TABLE token_usage` (provider, model, purpose, tokens, cost, timestamp)
+- v9: `ALTER TABLE user_preferences ADD COLUMN theme_custom_colors` (TEXT/JSON)
+
+### Domain Types
+- `ThemeColors` interface (11 hex string fields) and `ThemePresetId` type
+- `ActivityProfile` type (lurker, conversationalist, creator, community, custom)
+- `PostStrategy` and `CommentStrategy` interfaces
+- `TokenUsagePurpose` type (11 categories)
+- `EngagementRules` extended with `activity_profile`, `post_strategy`, `comment_strategy`, `daily_post_budget`, `daily_comment_budget`
+- `Submolt` extended with `your_role` field
+- `UserPreferences` extended with `suppress_sync_prompt`, `theme_custom_colors`, and updated `theme` type
+- `ChatRequest` extended with optional `purpose` field
+
+### New IPC Channels
+- `analytics:token-usage` — aggregated token usage statistics
+- `persona:test-decisions` — persona decision test runner
+- `settings:save-preferences` — dedicated preferences save endpoint
+
+### Removed
+- **Bonus Features Panel** — removed entirely. All 5 features (Mood Ring, Trend Detector, Rivalry Tracker, Karma Forecast, Post Idea Generator) were synthetic LLM-generated data with no Moltbook API backing. Removed: `BonusPanel.tsx`, `BonusSlice` from store, `bonus:*` IPC channels (5), `MoodData`/`TrendItem`/`Rivalry`/`KarmaForecast`/`PostIdea` types, 5 `ipcMain.handle` blocks, sidebar/command palette/panel container references
+
+### New Files
+- `src/shared/theme-presets.ts` — 5 theme presets, `hexToChannels()`, `resolveThemeColors()`
+- `src/renderer/src/hooks/useTheme.ts` — `applyThemeToDOM()` and `useTheme()` hook
+
+### Preload
+- Added `analytics:token-usage`, `persona:test-decisions`, `settings:save-preferences` to allowed invoke channels
+
 ## 0.3.1 — 2026-02-07
 
 Stability patch — fixes React crash on autopilot scanning, hardens API data normalization, improves autopilot UI and rate limit enforcement.
@@ -337,24 +441,17 @@ Initial release.
 - **Autopilot Controls**: mode toggle, action queue with approve/reject, action counters, emergency stop
 - **Moderation Dashboard**: submolt selector, pin manager, moderator list, moderation log
 
-### Bonus Features
-- Mood Ring: D3.js radial chart of per-submolt engagement sentiment
-- Trend Detector: cross-submolt trending topics with sparkline graphs
-- Rivalry Tracker: agent disagreement scoring with intensity bars
-- Karma Forecast: D3.js line chart with historical + projected trajectory, LLM analysis
-- Post Idea Generator: LLM-powered content suggestions with adopt button
-
 ### UI Shell
 - Custom frameless window with title bar drag region
-- Sidebar icon rail with 11 navigation items
-- Dark theme with Tailwind CSS custom color palette
+- Sidebar icon rail with 10 navigation items
+- Runtime theme switching with 5 presets and custom color editor
 - Ctrl+K command palette
 - Status bar (connection, autopilot mode, rate limits, active LLM)
 - Toast notification system
 - Lazy-loaded panel components
 
 ### State Management
-- Zustand store with 12 slices: ui, feed, agents, submolts, conversation, persona, search, analytics, autopilot, moderation, settings, bonus
+- Zustand store with 11 slices: ui, feed, agents, submolts, conversation, persona, search, analytics, autopilot, moderation, settings
 
 ### Settings
 - Agent registration flow with auto-save

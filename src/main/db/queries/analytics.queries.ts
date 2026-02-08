@@ -75,3 +75,69 @@ export function getActivityStats(): any {
     FROM activity_log
   `)
 }
+
+// --- Token Usage Tracking ---
+
+export function recordTokenUsage(entry: {
+  purpose: string; provider: string; model: string;
+  tokens_input: number; tokens_output: number; persona_id?: string | null
+}): void {
+  run(
+    `INSERT INTO token_usage (id, purpose, provider, model, tokens_input, tokens_output, persona_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    [genId(), entry.purpose, entry.provider, entry.model,
+     entry.tokens_input, entry.tokens_output, entry.persona_id ?? null]
+  )
+}
+
+export function getTokenUsageStats(): any {
+  // Period totals
+  const today = queryOne<any>(`
+    SELECT COALESCE(SUM(tokens_input), 0) as input, COALESCE(SUM(tokens_output), 0) as output
+    FROM token_usage WHERE created_at >= datetime('now', 'start of day')
+  `)
+  const week = queryOne<any>(`
+    SELECT COALESCE(SUM(tokens_input), 0) as input, COALESCE(SUM(tokens_output), 0) as output
+    FROM token_usage WHERE created_at >= datetime('now', '-7 days')
+  `)
+  const month = queryOne<any>(`
+    SELECT COALESCE(SUM(tokens_input), 0) as input, COALESCE(SUM(tokens_output), 0) as output
+    FROM token_usage WHERE created_at >= datetime('now', '-30 days')
+  `)
+  const allTime = queryOne<any>(`
+    SELECT COALESCE(SUM(tokens_input), 0) as input, COALESCE(SUM(tokens_output), 0) as output
+    FROM token_usage
+  `)
+
+  // Breakdown by purpose (last 30 days)
+  const byPurpose = queryAll<any>(`
+    SELECT purpose, COALESCE(SUM(tokens_input), 0) as input, COALESCE(SUM(tokens_output), 0) as output
+    FROM token_usage WHERE created_at >= datetime('now', '-30 days')
+    GROUP BY purpose ORDER BY (input + output) DESC
+  `)
+
+  // Breakdown by provider (last 30 days)
+  const byProvider = queryAll<any>(`
+    SELECT provider, COALESCE(SUM(tokens_input), 0) as input, COALESCE(SUM(tokens_output), 0) as output
+    FROM token_usage WHERE created_at >= datetime('now', '-30 days')
+    GROUP BY provider ORDER BY (input + output) DESC
+  `)
+
+  // Daily trend (last 14 days)
+  const dailyTrend = queryAll<any>(`
+    SELECT date(created_at) as date,
+      COALESCE(SUM(tokens_input), 0) as input, COALESCE(SUM(tokens_output), 0) as output
+    FROM token_usage WHERE created_at >= datetime('now', '-14 days')
+    GROUP BY date(created_at) ORDER BY date ASC
+  `)
+
+  return {
+    today: today ?? { input: 0, output: 0 },
+    week: week ?? { input: 0, output: 0 },
+    month: month ?? { input: 0, output: 0 },
+    all_time: allTime ?? { input: 0, output: 0 },
+    by_purpose: byPurpose,
+    by_provider: byProvider,
+    daily_trend: dailyTrend
+  }
+}

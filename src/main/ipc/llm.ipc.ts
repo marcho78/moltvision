@@ -7,7 +7,7 @@ import log from 'electron-log'
 export function registerLlmHandlers(): void {
   ipcMain.handle(IPC.LLM_GENERATE, async (_e, payload) => {
     try {
-      const response = await llmManager.chat(payload)
+      const response = await llmManager.chat({ ...payload, purpose: payload.purpose ?? 'manual_generation' })
       logActivity({
         activity_type: 'llm_generate',
         summary: `LLM generation via ${response.provider}`,
@@ -46,7 +46,8 @@ export function registerLlmHandlers(): void {
         ],
         temperature: 0,
         max_tokens: 60,
-        provider: payload?.provider ?? undefined
+        provider: payload?.provider ?? undefined,
+        purpose: 'whoami'
       })
       return {
         identity: response.content,
@@ -68,7 +69,8 @@ export function registerLlmHandlers(): void {
           { role: 'user', content: payload.text }
         ],
         temperature: 0,
-        max_tokens: 100
+        max_tokens: 100,
+        purpose: 'embedding'
       })
       return { summary: response.content }
     } catch (err) {

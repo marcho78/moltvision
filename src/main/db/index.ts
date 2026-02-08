@@ -79,6 +79,7 @@ CREATE TABLE IF NOT EXISTS cached_submolts (
   is_subscribed INTEGER NOT NULL DEFAULT 0,
   moderators TEXT NOT NULL DEFAULT '[]',
   rules TEXT NOT NULL DEFAULT '[]',
+  your_role TEXT,
   created_at TEXT NOT NULL,
   cached_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -266,6 +267,21 @@ CREATE TABLE IF NOT EXISTS reply_inbox (
 );
 CREATE INDEX IF NOT EXISTS idx_inbox_read ON reply_inbox(is_read);
 CREATE INDEX IF NOT EXISTS idx_inbox_time ON reply_inbox(discovered_at DESC);
+
+-- Token Usage Tracking (v8)
+CREATE TABLE IF NOT EXISTS token_usage (
+  id TEXT PRIMARY KEY,
+  purpose TEXT NOT NULL,
+  provider TEXT NOT NULL,
+  model TEXT NOT NULL,
+  tokens_input INTEGER NOT NULL DEFAULT 0,
+  tokens_output INTEGER NOT NULL DEFAULT 0,
+  persona_id TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_token_usage_time ON token_usage(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_token_usage_purpose ON token_usage(purpose);
+CREATE INDEX IF NOT EXISTS idx_token_usage_provider ON token_usage(provider);
 `
 
 let db: Database.Database | null = null
@@ -322,9 +338,42 @@ export function initDb(): Database.Database {
     db.prepare('UPDATE schema_version SET version = 5, applied_at = datetime(\'now\') WHERE id = 1').run()
     log.info('Migration v5: Added active_persona_id to user_preferences')
   }
+  if (currentVersion < 6) {
+    const cols = db.pragma('table_info(user_preferences)') as any[]
+    if (!cols.some((c: any) => c.name === 'suppress_sync_prompt')) {
+      db.exec('ALTER TABLE user_preferences ADD COLUMN suppress_sync_prompt INTEGER NOT NULL DEFAULT 0')
+    }
+    db.prepare('UPDATE schema_version SET version = 6, applied_at = datetime(\'now\') WHERE id = 1').run()
+    log.info('Migration v6: Added suppress_sync_prompt to user_preferences')
+  }
+
+  if (currentVersion < 7) {
+    const cols = db.pragma('table_info(cached_submolts)') as any[]
+    if (!cols.some((c: any) => c.name === 'your_role')) {
+      db.exec('ALTER TABLE cached_submolts ADD COLUMN your_role TEXT')
+    }
+    db.prepare('UPDATE schema_version SET version = 7, applied_at = datetime(\'now\') WHERE id = 1').run()
+    log.info('Migration v7: Added your_role to cached_submolts')
+  }
+
+  if (currentVersion < 8) {
+    // v8: Token usage tracking table — schema already creates it via CREATE IF NOT EXISTS
+    db.prepare('UPDATE schema_version SET version = 8, applied_at = datetime(\'now\') WHERE id = 1').run()
+    log.info('Migration v8: Token usage tracking table')
+  }
+
+  if (currentVersion < 9) {
+    const cols = db.pragma('table_info(user_preferences)') as any[]
+    if (!cols.some((c: any) => c.name === 'theme_custom_colors')) {
+      db.exec('ALTER TABLE user_preferences ADD COLUMN theme_custom_colors TEXT')
+    }
+    db.prepare('UPDATE schema_version SET version = 9, applied_at = datetime(\'now\') WHERE id = 1').run()
+    log.info('Migration v9: Added theme_custom_colors to user_preferences')
+  }
 
   // --- Startup cleanup: session-scoped caches start fresh ---
-  const submoltsCleared = db.prepare(`DELETE FROM cached_submolts`).run().changes
+  // Preserve submolts where user has a role (owner/moderator) — only clear generic cached submolts
+  const submoltsCleared = db.prepare(`DELETE FROM cached_submolts WHERE your_role IS NULL`).run().changes
   const postsExpired = db.prepare(`DELETE FROM cached_posts WHERE cached_at < datetime('now', '-3 days')`).run().changes
   const commentsExpired = db.prepare(`DELETE FROM cached_comments WHERE cached_at < datetime('now', '-7 days')`).run().changes
   const agentsExpired = db.prepare(`DELETE FROM cached_agents WHERE cached_at < datetime('now', '-7 days')`).run().changes
